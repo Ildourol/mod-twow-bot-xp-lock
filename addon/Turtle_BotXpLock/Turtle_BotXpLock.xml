@@ -16,7 +16,7 @@
                         <Anchor point="LEFT"><Offset><AbsDimension x="4" y="0"/></Offset></Anchor>
                     </Anchors>
                 </Texture>
-                <FontString name="$parentName" inherits="GameFontNormalSmall" justifyH="LEFT" text="BotName">
+                <FontString name="$parentName" inherits="GameFontNormalSmall" justifyH="LEFT" text="">
                     <Size><AbsDimension x="110" y="16"/></Size>
                     <Anchors>
                         <Anchor point="LEFT" relativeTo="$parentClassIcon" relativePoint="RIGHT">
@@ -24,7 +24,7 @@
                         </Anchor>
                     </Anchors>
                 </FontString>
-                <FontString name="$parentStatus" inherits="GameFontHighlightSmall" justifyH="CENTER" text="ACTIVE">
+                <FontString name="$parentStatus" inherits="GameFontHighlightSmall" justifyH="CENTER" text="">
                     <Size><AbsDimension x="70" y="16"/></Size>
                     <Anchors>
                         <Anchor point="LEFT" relativeTo="$parentName" relativePoint="RIGHT">
@@ -64,19 +64,19 @@
         </Backdrop>
         <Layers>
             <Layer level="ARTWORK">
-                <FontString name="$parentName" inherits="GameFontNormalSmall" justifyH="LEFT" text="BotName">
+                <FontString name="$parentName" inherits="GameFontNormalSmall" justifyH="LEFT" text="">
                     <Size><AbsDimension x="110" y="16"/></Size>
                     <Anchors>
                         <Anchor point="LEFT"><Offset><AbsDimension x="8" y="0"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
-                <FontString name="$parentLevel" inherits="GameFontHighlightSmall" justifyH="CENTER" text="Lvl 60">
+                <FontString name="$parentLevel" inherits="GameFontHighlightSmall" justifyH="CENTER" text="">
                     <Size><AbsDimension x="45" y="16"/></Size>
                     <Anchors>
                         <Anchor point="LEFT" relativeTo="$parentName" relativePoint="RIGHT"><Offset><AbsDimension x="2" y="0"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
-                <FontString name="$parentStatus" inherits="GameFontHighlightSmall" justifyH="CENTER" text="LOCKED">
+                <FontString name="$parentStatus" inherits="GameFontHighlightSmall" justifyH="CENTER" text="">
                     <Size><AbsDimension x="95" y="16"/></Size>
                     <Anchors>
                         <Anchor point="LEFT" relativeTo="$parentLevel" relativePoint="RIGHT"><Offset><AbsDimension x="2" y="0"/></Offset></Anchor>
@@ -468,6 +468,10 @@
                         <Anchor point="TOPLEFT"><Offset><AbsDimension x="18" y="-56"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
+                <FontString name="Turtle_BotXpLock_RegPageText" inherits="GameFontNormalSmall" text="Page 1 / 1" justifyH="CENTER">
+                    <Size><AbsDimension x="90" y="20"/></Size>
+                    <Anchors><Anchor point="BOTTOM"><Offset><AbsDimension x="-10" y="18"/></Offset></Anchor></Anchors>
+                </FontString>
             </Layer>
         </Layers>
 
@@ -523,10 +527,6 @@
                     <OnClick>TurtleBotXpLock_OnRegistryPage(-1)</OnClick>
                 </Scripts>
             </Button>
-            <FontString name="Turtle_BotXpLock_RegPageText" inherits="GameFontNormalSmall" text="Page 1 / 1" justifyH="CENTER">
-                <Size><AbsDimension x="90" y="20"/></Size>
-                <Anchors><Anchor point="BOTTOM"><Offset><AbsDimension x="-10" y="18"/></Offset></Anchor></Anchors>
-            </FontString>
             <Button name="Turtle_BotXpLock_RegNextBtn" inherits="UIPanelButtonTemplate" text="Next &gt;">
                 <Size><AbsDimension x="70" y="22"/></Size>
                 <Anchors><Anchor point="BOTTOMRIGHT"><Offset><AbsDimension x="-18" y="16"/></Offset></Anchor></Anchors>

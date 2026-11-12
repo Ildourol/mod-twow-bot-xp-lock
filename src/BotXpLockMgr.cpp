@@ -501,6 +501,8 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
         if (std::getline(ss, guidStr, '\t'))
         {
             uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
+            if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
+                botGuid = sender->GetSelectionGuid().GetCounter();
             SendStatusAddonMessage(sender, botGuid);
         }
     }
@@ -511,6 +513,9 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
         if (std::getline(ss, guidStr, '\t'))
         {
             uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
+            if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
+                botGuid = sender->GetSelectionGuid().GetCounter();
+
             uint8 targetLevel = 0;
             if (std::getline(ss, levelStr, '\t'))
                 targetLevel = static_cast<uint8>(std::strtoul(levelStr.c_str(), nullptr, 10));
@@ -540,6 +545,8 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
         if (std::getline(ss, guidStr, '\t'))
         {
             uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
+            if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
+                botGuid = sender->GetSelectionGuid().GetCounter();
 
             if (sBotXpLockConfig.IsPartyOnly())
             {
@@ -567,6 +574,9 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
         if (std::getline(ss, guidStr, '\t') && std::getline(ss, rateStr, '\t'))
         {
             uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
+            if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
+                botGuid = sender->GetSelectionGuid().GetCounter();
+
             float rate = static_cast<float>(std::atof(rateStr.c_str()));
 
             if (sBotXpLockConfig.IsPartyOnly())
