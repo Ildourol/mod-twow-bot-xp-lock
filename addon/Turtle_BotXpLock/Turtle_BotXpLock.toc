@@ -1,0 +1,8 @@
+## Interface: 11200
+## Title: |cff00ff00Turtle|r Bot XP Lock
+## Notes: Individual bot XP locking, twink level caps, and party companion management
+## Author: Antigravity
+## Version: 1.0.0
+## SavedVariables: Turtle_BotXpLock_DB
+Turtle_BotXpLock.lua
+Turtle_BotXpLock.xml

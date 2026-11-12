@@ -1,0 +1,43 @@
+###################################################################################################
+# TURTLE VMANGOS MOD-TWOW-BOT-XP-LOCK CONFIGURATION
+###################################################################################################
+
+[BotXpLock]
+
+#
+#    BotXpLock.Enable
+#        Description: Enable or disable the Bot XP Lock system.
+#        Default:     1 (Enabled)
+#                     0 (Disabled)
+#
+BotXpLock.Enable = 1
+
+#
+#    BotXpLock.PartyOnly
+#        Description: If set to 1, players can only lock/unlock XP for bots currently in their party or raid.
+#                     If set to 0, players can lock/unlock any friendly bot they target or own.
+#        Default:     0
+#
+BotXpLock.PartyOnly = 0
+
+#
+#    BotXpLock.AllowCustomCap
+#        Description: Allow players to set custom future level caps (e.g. 19, 29, 39, 49, 59 twink caps).
+#                     The bot levels up normally until reaching the cap, then XP locks automatically.
+#        Default:     1
+#
+BotXpLock.AllowCustomCap = 1
+
+#
+#    BotXpLock.ClampAltSyncDing
+#        Description: If 1, prevents bot alt-level sync from forcing a ding beyond the bot's locked level.
+#        Default:     1
+#
+BotXpLock.ClampAltSyncDing = 1
+
+#
+#    BotXpLock.NotifyOnLock
+#        Description: Send an in-game system message feedback when locking or unlocking bot XP.
+#        Default:     1
+#
+BotXpLock.NotifyOnLock = 1

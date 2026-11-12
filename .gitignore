@@ -1,0 +1,15 @@
+# Build & IDE artifacts
+build/
+bin/
+*.user
+*.suo
+*.sln.docstates
+.vs/
+.idea/
+*.log
+*.tmp
+*.bak
+*.orig
+
+# Protocol & Agent files
+AGENTS.md
