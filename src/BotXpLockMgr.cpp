@@ -46,7 +46,9 @@ void BotXpLockMgr::LoadFromDB()
     m_locks.clear();
 
     std::unique_ptr<QueryResult> result(CharacterDatabase.Query(
-        "SELECT guid, locked, lock_level, locked_at_level, xp_rate, locked_by_guid FROM `bot_xp_locks`"
+        "SELECT l.guid, l.locked, l.lock_level, l.locked_at_level, l.xp_rate, l.locked_by_guid, c.name, c.level "
+        "FROM `bot_xp_locks` l "
+        "LEFT JOIN `characters` c ON c.guid = l.guid"
     ));
 
     if (!result)
@@ -68,6 +70,16 @@ void BotXpLockMgr::LoadFromDB()
         entry.lockedAtLevel = fields[3].GetUInt8();
         entry.xpRate = fields[4].GetFloat();
         entry.lockedByGuid = fields[5].GetUInt32();
+
+        char const* name = fields[6].GetString();
+        if (name && *name)
+            entry.botName = name;
+        else
+            entry.botName = "Bot#" + std::to_string(guid);
+
+        uint8 charLevel = fields[7].GetUInt8();
+        if (charLevel > 0)
+            entry.lockedAtLevel = charLevel;
 
         m_locks[guid] = entry;
         ++count;
@@ -386,8 +398,7 @@ std::vector<BotXpLock::LockEntry> BotXpLockMgr::GetAllLockedBots() const
     std::vector<BotXpLock::LockEntry> list;
     for (auto const& pair : m_locks)
     {
-        if (pair.second.locked || pair.second.xpRate != 1.0f)
-            list.push_back(pair.second);
+        list.push_back(pair.second);
     }
     return list;
 }
@@ -598,6 +609,47 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
             SendStatusAddonMessage(sender, botGuid);
         }
     }
+    else if (action == "TOGGLE")
+    {
+        std::string guidStr;
+        if (std::getline(ss, guidStr, '\t'))
+        {
+            uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
+            if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
+                botGuid = sender->GetSelectionGuid().GetCounter();
+
+            if (botGuid > 0)
+            {
+                if (sBotXpLockConfig.IsPartyOnly())
+                {
+                    Group* grp = sender->GetGroup();
+                    if (!grp || !grp->IsMember(ObjectGuid(HIGHGUID_PLAYER, botGuid)))
+                    {
+                        ChatHandler(sender).SendSysMessage("|cffff2020[BotXpLock] You can only toggle XP for bots in your party.|r");
+                        return;
+                    }
+                }
+
+                bool currentlyLocked = false;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    auto it = m_locks.find(botGuid);
+                    if (it != m_locks.end())
+                    {
+                        currentlyLocked = it->second.locked || (it->second.xpRate <= 0.0f);
+                    }
+                }
+
+                std::string feedback;
+                SetLock(botGuid, !currentlyLocked, 0, sender->GetGUIDLow(), &feedback);
+
+                if (sBotXpLockConfig.IsNotifyOnLock() && !feedback.empty())
+                    ChatHandler(sender).SendSysMessage(("|cff00ff00[BotXpLock]|r " + feedback).c_str());
+
+                SendStatusAddonMessage(sender, botGuid);
+            }
+        }
+    }
     else if (action == "ROSTER_QUERY")
     {
         SendRosterAddonMessage(sender);
@@ -699,6 +751,33 @@ void BotXpLockMgr::HandleCommand(ChatHandler* handler, Player* sender, std::stri
         return;
     }
 
+    if (subCmd == "toggle")
+    {
+        if (!target)
+        {
+            handler->SendSysMessage("|cffff2020Error:|r Target a bot to toggle XP lock, or type .botxplock help.");
+            return;
+        }
+
+        uint32 botGuid = target->GetGUIDLow();
+        bool currentlyLocked = false;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto it = m_locks.find(botGuid);
+            if (it != m_locks.end())
+            {
+                currentlyLocked = it->second.locked || (it->second.xpRate <= 0.0f);
+            }
+        }
+
+        std::string feedback;
+        SetLock(botGuid, !currentlyLocked, 0, sender->GetGUIDLow(), &feedback);
+
+        handler->PSendSysMessage("|cff00ff00[BotXpLock]|r %s", feedback.c_str());
+        SendStatusAddonMessage(sender, botGuid);
+        return;
+    }
+
     if (subCmd == "lock" || subCmd == "freeze")
     {
         if (!target)
@@ -762,6 +841,7 @@ void BotXpLockMgr::HandleCommand(ChatHandler* handler, Player* sender, std::stri
     {
         handler->SendSysMessage("|cff00ff00=== Bot XP Lock & Rate Commands ===|r");
         handler->SendSysMessage(" .botxplock status          - View XP lock and rate status for targeted bot");
+        handler->SendSysMessage(" .botxplock toggle          - Toggle XP lock (freeze/unlock) for targeted bot");
         handler->SendSysMessage(" .botxplock lock            - Lock XP immediately at targeted bot's current level");
         handler->SendSysMessage(" .botxplock lock <level>    - Cap targeted bot's XP at specified level (e.g. 19, 29)");
         handler->SendSysMessage(" .botxplock rate <mult>     - Set individual XP rate (e.g. 0.5 for half XP, 2.0 for double)");

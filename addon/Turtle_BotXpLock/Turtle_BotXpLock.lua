@@ -5,6 +5,8 @@
 
 local ADDON_PREFIX = "TW_BOT_XPLOCK"
 local currentTargetGuid = 0
+local currentTargetStatus = 0 -- 0: unknown/unlocked, 1: locked, 2: capped
+local partyBotStatus = {} -- [partyIndex] = { isLocked = 0, lockLevel = 0, xpRate = 1.0 }
 local registryBots = {}
 local registryPage = 1
 local ROWS_PER_PAGE = 10
@@ -28,9 +30,34 @@ local function SplitString(str, delim)
     return result
 end
 
--- Send wire messages.
--- Silent queries use Addon message when grouped.
--- Explicit button actions send .botxplock commands directly, guaranteeing execution whether solo or grouped!
+-- -----------------------------------------------------------------------------
+-- 2. Silent Slash Chat Command Filter
+-- Suppresses .botxplock commands and server error echo from chat boxes
+-- -----------------------------------------------------------------------------
+local origChatFrame_OnEvent = ChatFrame_OnEvent
+ChatFrame_OnEvent = function(event)
+    if (event == "CHAT_MSG_SAY" or event == "CHAT_MSG_WHISPER_INFORM" or event == "CHAT_MSG_WHISPER") and type(arg1) == "string" and string.find(arg1, "^%.botxplock%s*") then
+        return
+    end
+    origChatFrame_OnEvent(event)
+end
+
+for i = 1, 7 do
+    local cf = getglobal("ChatFrame" .. i)
+    if cf and cf.AddMessage then
+        local origAdd = cf.AddMessage
+        cf.AddMessage = function(this, msg, r, g, b, id)
+            if type(msg) == "string" and string.find(msg, "^%.botxplock%s*") then
+                return
+            end
+            origAdd(this, msg, r, g, b, id)
+        end
+    end
+end
+
+-- -----------------------------------------------------------------------------
+-- 3. Send Wire / Command Messages
+-- -----------------------------------------------------------------------------
 local function SendModuleMessage(action, guid, level, rate, runChatCmd)
     local cmd = ""
     if action == "LOCK" then
@@ -41,6 +68,8 @@ local function SendModuleMessage(action, guid, level, rate, runChatCmd)
         end
     elseif action == "UNLOCK" then
         cmd = "unlock"
+    elseif action == "TOGGLE" then
+        cmd = "toggle"
     elseif action == "RATE" then
         cmd = "rate " .. tostring(rate or 1.0)
     elseif action == "LIST_QUERY" then
@@ -49,7 +78,7 @@ local function SendModuleMessage(action, guid, level, rate, runChatCmd)
         cmd = "status"
     end
 
-    -- 1. Addon wire packet (if in party/raid)
+    -- 1. Try Addon wire message if in group/raid
     local payload = action .. "\t" .. tostring(guid or 0) .. "\t" .. tostring(level or 0)
     if rate then
         payload = payload .. "\t" .. tostring(rate)
@@ -60,18 +89,21 @@ local function SendModuleMessage(action, guid, level, rate, runChatCmd)
         SendAddonMessage(ADDON_PREFIX, payload, "PARTY")
     end
 
-    -- 2. Execute slash command for action updates or when runChatCmd is true
-    if runChatCmd and cmd ~= "" then
+    -- 2. Send slash command directly if runChatCmd is true OR if solo (not grouped)
+    -- This guarantees immediate server reception and execution in ALL situations!
+    if cmd ~= "" and (runChatCmd or not inGroup) then
         SendChatMessage(".botxplock " .. cmd, "SAY")
     end
 end
 
 -- -----------------------------------------------------------------------------
--- 2. UI View Updaters
+-- 4. UI View Updaters
 -- -----------------------------------------------------------------------------
 local function UpdateTargetDisplay()
     local name = UnitName("target")
     if not name or not UnitIsPlayer("target") or not UnitIsFriend("player", "target") then
+        currentTargetGuid = 0
+        currentTargetStatus = 0
         Turtle_BotXpLock_TargetName:SetText("No Bot Selected")
         Turtle_BotXpLock_TargetInfo:SetText("Target a friendly companion bot or party member")
         Turtle_BotXpLock_StatusText:SetText("XP STATUS: NO TARGET")
@@ -97,7 +129,7 @@ local function UpdateTargetDisplay()
         if btn then btn:Enable() end
     end
 
-    -- Query fresh status silently from server (NO chat triggers)
+    -- Query fresh status silently from server (works whether solo or grouped)
     SendModuleMessage("QUERY", 0, 0, nil, false)
 end
 
@@ -106,16 +138,20 @@ local function ApplyStatusData(guid, name, level, curXP, nextXP, isLocked, lockL
     local rateVal = xpRate or 1.0
 
     if targetName and (targetName == name or guid == currentTargetGuid) then
+        currentTargetGuid = guid
         if isLocked == 1 or rateVal <= 0 then
             if lockLevel > 0 and level < lockLevel then
+                currentTargetStatus = 2 -- Capped
                 Turtle_BotXpLock_StatusText:SetText("|cffffa500CAPPED AT LVL " .. tostring(lockLevel) .. " (RATE: " .. tostring(rateVal) .. "x)|r")
                 Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.35, 0.25, 0.05, 0.90)
             else
+                currentTargetStatus = 1 -- Locked
                 local lockDisp = (lockLevel > 0) and lockLevel or level
                 Turtle_BotXpLock_StatusText:SetText("|cffff2020LOCKED AT LVL " .. tostring(lockDisp) .. " (0x XP)|r")
                 Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.40, 0.08, 0.08, 0.90)
             end
         else
+            currentTargetStatus = 0 -- Unlocked
             if rateVal ~= 1.0 then
                 Turtle_BotXpLock_StatusText:SetText("|cff00ff00XP ACTIVE (RATE: |cffffd100" .. tostring(rateVal) .. "x|cff00ff00)|r")
             else
@@ -125,25 +161,35 @@ local function ApplyStatusData(guid, name, level, curXP, nextXP, isLocked, lockL
         end
     end
 
-    -- Update party rows if matching
+    -- Update party rows and button states
     local numParty = GetNumPartyMembers()
     for i = 1, 4 do
         local row = getglobal("Turtle_BotXpLock_PartyRow" .. i)
-        if row then
-            if i <= numParty then
-                local pName = UnitName("party" .. i)
-                if pName and pName == name then
-                    local statusStr = "|cff00ff00" .. tostring(rateVal) .. "x|r"
-                    if isLocked == 1 or rateVal <= 0 then
-                        if lockLevel > 0 and level < lockLevel then
-                            statusStr = "|cffffa500CAP " .. tostring(lockLevel) .. "|r"
-                        else
-                            statusStr = "|cffff2020LOCKED|r"
-                        end
+        if row and i <= numParty then
+            local pName = UnitName("party" .. i)
+            if pName and pName == name then
+                partyBotStatus[i] = {
+                    isLocked = isLocked,
+                    lockLevel = lockLevel,
+                    xpRate = rateVal
+                }
+
+                local statusStr = "|cff00ff00" .. tostring(rateVal) .. "x|r"
+                local toggleBtn = getglobal("Turtle_BotXpLock_PartyRow" .. i .. "ToggleBtn")
+
+                if isLocked == 1 or rateVal <= 0 then
+                    if lockLevel > 0 and level < lockLevel then
+                        statusStr = "|cffffa500CAP " .. tostring(lockLevel) .. "|r"
+                    else
+                        statusStr = "|cffff2020LOCKED|r"
                     end
-                    local statusText = getglobal("Turtle_BotXpLock_PartyRow" .. i .. "Status")
-                    if statusText then statusText:SetText(statusStr) end
+                    if toggleBtn then toggleBtn:SetText("Unlock") end
+                else
+                    if toggleBtn then toggleBtn:SetText("Freeze") end
                 end
+
+                local statusText = getglobal("Turtle_BotXpLock_PartyRow" .. i .. "Status")
+                if statusText then statusText:SetText(statusStr) end
             end
         end
     end
@@ -164,8 +210,16 @@ local function UpdatePartyRoster()
                     nameText:SetText(pName or "Party" .. i)
                 end
 
+                local toggleBtn = getglobal("Turtle_BotXpLock_PartyRow" .. i .. "ToggleBtn")
+                local pData = partyBotStatus[i]
+                if pData and (pData.isLocked == 1 or pData.xpRate <= 0) then
+                    if toggleBtn then toggleBtn:SetText("Unlock") end
+                else
+                    if toggleBtn then toggleBtn:SetText("Freeze") end
+                end
+
                 local statusText = getglobal("Turtle_BotXpLock_PartyRow" .. i .. "Status")
-                if statusText then
+                if statusText and (not pData) then
                     statusText:SetText("Lvl " .. tostring(pLevel))
                 end
             else
@@ -176,7 +230,7 @@ local function UpdatePartyRoster()
 end
 
 -- -----------------------------------------------------------------------------
--- 3. Configured Bots Registry Panel Display
+-- 5. Configured Bots Registry Panel Display (Reads SQL / Server Cache)
 -- -----------------------------------------------------------------------------
 local function UpdateRegistryDisplay()
     local total = table.getn(registryBots)
@@ -238,17 +292,18 @@ function TurtleBotXpLock_ToggleRegistry()
     else
         Turtle_BotXpLock_RegistryFrame:Show()
         Turtle_BotXpLock_ToggleRegistryButton:SetText("<< Hide Registry")
-        SendModuleMessage("LIST_QUERY", 0, 0, nil, false)
+        SendModuleMessage("LIST_QUERY", 0, 0, nil, true)
     end
 end
 
 -- -----------------------------------------------------------------------------
--- 4. Click Handlers
+-- 6. Click Handlers
 -- -----------------------------------------------------------------------------
 function TurtleBotXpLock_OnFreezeClick()
     local name = UnitName("target")
     if not name then return end
     SendModuleMessage("LOCK", 0, 0, nil, true)
+    currentTargetStatus = 1
     Turtle_BotXpLock_StatusText:SetText("|cffff2020LOCKED (0x XP)|r")
     Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.40, 0.08, 0.08, 0.90)
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Locked XP for |cffffd100" .. name .. "|r.")
@@ -258,6 +313,7 @@ function TurtleBotXpLock_OnUnlockClick()
     local name = UnitName("target")
     if not name then return end
     SendModuleMessage("UNLOCK", 0, 0, nil, true)
+    currentTargetStatus = 0
     Turtle_BotXpLock_StatusText:SetText("|cff00ff00XP ACTIVE (NORMAL 1.0x)|r")
     Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.08, 0.35, 0.08, 0.90)
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Unlocked XP for |cffffd100" .. name .. "|r.")
@@ -267,6 +323,7 @@ function TurtleBotXpLock_OnCapClick(level)
     local name = UnitName("target")
     if not name then return end
     SendModuleMessage("LOCK", 0, level, nil, true)
+    currentTargetStatus = 2
     Turtle_BotXpLock_StatusText:SetText("|cffffa500CAPPED AT LVL " .. tostring(level) .. "|r")
     Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.35, 0.25, 0.05, 0.90)
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Set Level " .. tostring(level) .. " cap for |cffffd100" .. name .. "|r.")
@@ -286,6 +343,7 @@ function TurtleBotXpLock_OnCustomCapSet()
     end
     Turtle_BotXpLock_CustomCapBox:ClearFocus()
     SendModuleMessage("LOCK", 0, level, nil, true)
+    currentTargetStatus = 2
     Turtle_BotXpLock_StatusText:SetText("|cffffa500CAPPED AT LVL " .. tostring(level) .. "|r")
     Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.35, 0.25, 0.05, 0.90)
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Custom cap of Level " .. tostring(level) .. " applied to |cffffd100" .. name .. "|r.")
@@ -299,14 +357,29 @@ function TurtleBotXpLock_OnRateClick(rate)
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Set XP rate to " .. tostring(rate) .. "x for |cffffd100" .. name .. "|r.")
 end
 
+-- Toggles Party Member XP between Freeze and Unlock based on active status
 function TurtleBotXpLock_OnPartyRowToggle(partyIndex)
     local unit = "party" .. tostring(partyIndex)
     local name = UnitName(unit)
     if not name then return end
 
     TargetUnit(unit)
-    SendModuleMessage("LOCK", 0, 0, nil, true)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Toggled XP lock for |cffffd100" .. name .. "|r.")
+    local pData = partyBotStatus[partyIndex]
+    local isCurrentlyLocked = pData and (pData.isLocked == 1 or pData.xpRate <= 0)
+
+    if isCurrentlyLocked then
+        SendModuleMessage("UNLOCK", 0, 0, nil, true)
+        if pData then pData.isLocked = 0 end
+        local toggleBtn = getglobal("Turtle_BotXpLock_PartyRow" .. partyIndex .. "ToggleBtn")
+        if toggleBtn then toggleBtn:SetText("Freeze") end
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Unlocked XP for |cffffd100" .. name .. "|r.")
+    else
+        SendModuleMessage("LOCK", 0, 0, nil, true)
+        if pData then pData.isLocked = 1 end
+        local toggleBtn = getglobal("Turtle_BotXpLock_PartyRow" .. partyIndex .. "ToggleBtn")
+        if toggleBtn then toggleBtn:SetText("Unlock") end
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Locked XP for |cffffd100" .. name .. "|r.")
+    end
 end
 
 function TurtleBotXpLock_Refresh()
@@ -314,12 +387,14 @@ function TurtleBotXpLock_Refresh()
     UpdatePartyRoster()
     SendModuleMessage("ROSTER_QUERY", 0, 0, nil, false)
     if Turtle_BotXpLock_RegistryFrame:IsShown() then
-        SendModuleMessage("LIST_QUERY", 0, 0, nil, false)
+        SendModuleMessage("LIST_QUERY", 0, 0, nil, true)
     end
 end
 
 -- -----------------------------------------------------------------------------
--- 5. Minimap Button (31x31 Vanilla Standard Circular Button)
+-- 7. Minimap Button (31x31 Vanilla Standard Circular Button)
+-- Left-Click: Quick Toggle Target Bot XP Lock (Freeze or Unlock)
+-- Right-Click / Shift-Click: Open Controller Panel
 -- -----------------------------------------------------------------------------
 local minimapBtn = CreateFrame("Button", "TurtleBotXpLockMinimapButton", Minimap)
 minimapBtn:SetFrameStrata("MEDIUM")
@@ -333,7 +408,7 @@ minimapBtn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highli
 local mmOverlay = minimapBtn:CreateTexture(nil, "OVERLAY")
 mmOverlay:SetWidth(53)
 mmOverlay:SetHeight(53)
-mmOverlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+mmOverlay:SetTexture("Interface\Minimap\MiniMap-TrackingBorder")
 mmOverlay:SetPoint("TOPLEFT", minimapBtn, "TOPLEFT", 0, 0)
 
 local mmIcon = minimapBtn:CreateTexture(nil, "BACKGROUND")
@@ -379,8 +454,16 @@ minimapBtn:SetScript("OnClick", function()
         end
     else
         if UnitExists("target") and UnitIsPlayer("target") and UnitIsFriend("player", "target") then
-            SendModuleMessage("LOCK", 0, 0, nil, false)
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Toggled XP lock for |cffffd100" .. UnitName("target") .. "|r.")
+            -- Quick Toggle target bot
+            if currentTargetStatus == 1 or currentTargetStatus == 2 then
+                SendModuleMessage("UNLOCK", 0, 0, nil, true)
+                currentTargetStatus = 0
+                DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Unlocked XP for |cffffd100" .. UnitName("target") .. "|r.")
+            else
+                SendModuleMessage("LOCK", 0, 0, nil, true)
+                currentTargetStatus = 1
+                DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Locked XP for |cffffd100" .. UnitName("target") .. "|r.")
+            end
         else
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Target a companion bot to toggle XP lock, or Right-Click / Shift-Click to open Controller window.")
         end
@@ -402,7 +485,7 @@ minimapBtn:SetScript("OnLeave", function()
 end)
 
 -- -----------------------------------------------------------------------------
--- 6. Core Event Listener
+-- 8. Core Event Listener
 -- -----------------------------------------------------------------------------
 local eventFrame = CreateFrame("Frame", "Turtle_BotXpLock_EventFrame")
 eventFrame:RegisterEvent("ADDON_LOADED")
@@ -419,9 +502,11 @@ eventFrame:SetScript("OnEvent", function()
             UpdateMinimapPosition()
         end
     elseif event == "PLAYER_TARGET_CHANGED" then
-        -- Only update display if frame is shown; otherwise just keep target tracking lightweight
         if Turtle_BotXpLockFrame:IsShown() then
             UpdateTargetDisplay()
+        elseif UnitExists("target") and UnitIsPlayer("target") and UnitIsFriend("player", "target") then
+            -- Silent background query so minimap button toggle knows status immediately
+            SendModuleMessage("QUERY", 0, 0, nil, false)
         end
     elseif event == "PARTY_MEMBERS_CHANGED" then
         if Turtle_BotXpLockFrame:IsShown() then
@@ -477,7 +562,7 @@ function TurtleBotXpLock_OnLoad()
 end
 
 -- -----------------------------------------------------------------------------
--- 7. Chat Slash Commands
+-- 9. Chat Slash Commands
 -- -----------------------------------------------------------------------------
 SLASH_TURTLEBOTXPLOCK1 = "/botxplock"
 SLASH_TURTLEBOTXPLOCK2 = "/xplock"
@@ -501,6 +586,8 @@ SlashCmdList["TURTLEBOTXPLOCK"] = function(msg)
         SendModuleMessage("LOCK", 0, cap, nil, true)
     elseif cmd == "unlock" or cmd == "unfreeze" then
         SendModuleMessage("UNLOCK", 0, 0, nil, true)
+    elseif cmd == "toggle" then
+        SendModuleMessage("TOGGLE", 0, 0, nil, true)
     elseif cmd == "rate" then
         local rate = tonumber(tokens[2]) or 1.0
         SendModuleMessage("RATE", 0, 0, rate, true)
@@ -511,6 +598,7 @@ SlashCmdList["TURTLEBOTXPLOCK"] = function(msg)
     else
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Commands:")
         DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock|r - Toggle Controller Panel")
+        DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock toggle|r - Toggle XP lock (freeze/unlock)")
         DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock lock [capLevel]|r - Lock target bot (e.g. /xplock lock 19)")
         DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock rate <mult>|r - Set XP rate (e.g. /xplock rate 0.5)")
         DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock unlock|r - Unlock target bot (1.0x)")
