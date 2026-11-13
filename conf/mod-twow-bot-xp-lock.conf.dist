@@ -41,3 +41,11 @@ BotXpLock.ClampAltSyncDing = 1
 #        Default:     1
 #
 BotXpLock.NotifyOnLock = 1
+
+#
+#    BotXpLock.Debug
+#        Description: Enable diagnostic debug logging for Bot XP Lock.
+#        Default:     1 (Enabled)
+#                     0 (Disabled)
+#
+BotXpLock.Debug = 0

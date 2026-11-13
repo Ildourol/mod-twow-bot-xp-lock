@@ -19,6 +19,7 @@ public:
     bool IsAllowCustomCap() const { return m_allowCustomCap; }
     bool IsClampAltSyncDing() const { return m_clampAltSyncDing; }
     bool IsNotifyOnLock() const { return m_notifyOnLock; }
+    bool IsDebug() const { return m_debug; }
 
 private:
     BotXpLockConfig() = default;
@@ -28,6 +29,7 @@ private:
     bool m_allowCustomCap = true;
     bool m_clampAltSyncDing = true;
     bool m_notifyOnLock = true;
+    bool m_debug = true;
 };
 
 #define sBotXpLockConfig BotXpLockConfig::Instance()

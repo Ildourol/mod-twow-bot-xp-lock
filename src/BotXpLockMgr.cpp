@@ -687,7 +687,7 @@ void BotXpLockMgr::SendRosterAddonMessage(Player* recipient)
     for (GroupReference* itr = grp->GetFirstMember(); itr != nullptr; itr = itr->next())
     {
         Player* member = itr->getSource();
-        if (member && IsPlayerBot(member))
+        if (member && member != recipient)
         {
             SendStatusAddonMessage(recipient, member->GetGUIDLow());
         }
@@ -765,15 +765,25 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
     {
         std::string guidStr;
         std::string levelStr;
+        std::string nameStr;
         if (std::getline(ss, guidStr, '\t'))
         {
             uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
-            if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
-                botGuid = sender->GetSelectionGuid().GetCounter();
-
             uint8 targetLevel = 0;
             if (std::getline(ss, levelStr, '\t'))
                 targetLevel = static_cast<uint8>(std::strtoul(levelStr.c_str(), nullptr, 10));
+            std::getline(ss, nameStr, '\t');
+
+            if (botGuid == 0 && !nameStr.empty())
+            {
+                std::string botName;
+                uint8 botLvl = 0;
+                Player* botPlayer = nullptr;
+                ResolveBot(sender, nameStr, botGuid, botName, botLvl, botPlayer);
+            }
+
+            if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
+                botGuid = sender->GetSelectionGuid().GetCounter();
 
             if (botGuid > 0)
             {
@@ -796,9 +806,20 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
     else if (action == "UNLOCK")
     {
         std::string guidStr;
+        std::string nameStr;
         if (std::getline(ss, guidStr, '\t'))
         {
             uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
+            std::getline(ss, nameStr, '\t');
+
+            if (botGuid == 0 && !nameStr.empty())
+            {
+                std::string botName;
+                uint8 botLvl = 0;
+                Player* botPlayer = nullptr;
+                ResolveBot(sender, nameStr, botGuid, botName, botLvl, botPlayer);
+            }
+
             if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
                 botGuid = sender->GetSelectionGuid().GetCounter();
 
@@ -824,13 +845,23 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
     {
         std::string guidStr;
         std::string rateStr;
+        std::string nameStr;
         if (std::getline(ss, guidStr, '\t') && std::getline(ss, rateStr, '\t'))
         {
             uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
+            float rate = static_cast<float>(std::atof(rateStr.c_str()));
+            std::getline(ss, nameStr, '\t');
+
+            if (botGuid == 0 && !nameStr.empty())
+            {
+                std::string botName;
+                uint8 botLvl = 0;
+                Player* botPlayer = nullptr;
+                ResolveBot(sender, nameStr, botGuid, botName, botLvl, botPlayer);
+            }
+
             if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
                 botGuid = sender->GetSelectionGuid().GetCounter();
-
-            float rate = static_cast<float>(std::atof(rateStr.c_str()));
 
             if (botGuid > 0)
             {
@@ -853,9 +884,20 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
     else if (action == "TOGGLE")
     {
         std::string guidStr;
+        std::string nameStr;
         if (std::getline(ss, guidStr, '\t'))
         {
             uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
+            std::getline(ss, nameStr, '\t');
+
+            if (botGuid == 0 && !nameStr.empty())
+            {
+                std::string botName;
+                uint8 botLvl = 0;
+                Player* botPlayer = nullptr;
+                ResolveBot(sender, nameStr, botGuid, botName, botLvl, botPlayer);
+            }
+
             if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
                 botGuid = sender->GetSelectionGuid().GetCounter();
 
@@ -890,9 +932,20 @@ void BotXpLockMgr::HandleAddonMessage(Player* sender, std::string const& payload
     else if (action == "DELETE")
     {
         std::string guidStr;
+        std::string nameStr;
         if (std::getline(ss, guidStr, '\t'))
         {
             uint32 botGuid = static_cast<uint32>(std::strtoul(guidStr.c_str(), nullptr, 10));
+            std::getline(ss, nameStr, '\t');
+
+            if (botGuid == 0 && !nameStr.empty())
+            {
+                std::string botName;
+                uint8 botLvl = 0;
+                Player* botPlayer = nullptr;
+                ResolveBot(sender, nameStr, botGuid, botName, botLvl, botPlayer);
+            }
+
             if (botGuid == 0 && sender->GetSelectionGuid().IsPlayer())
                 botGuid = sender->GetSelectionGuid().GetCounter();
 

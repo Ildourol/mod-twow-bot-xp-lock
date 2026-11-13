@@ -172,11 +172,15 @@ local function SendModuleMessage(action, guid, level, rate, runChatCmd, targetNa
     end
 
     -- 1. Try Addon wire message if in group/raid
-    local payload = action .. "\t" .. tostring(guid or 0) .. "\t" .. tostring(level or 0)
-    if action == "QUERY" and targetName and targetName ~= "" then
-        payload = payload .. "\t" .. targetName
-    elseif rate then
-        payload = payload .. "\t" .. tostring(rate)
+    local payload = action .. "\t" .. tostring(guid or 0)
+    if action == "LOCK" then
+        payload = payload .. "\t" .. tostring(level or 0) .. "\t" .. (targetName or "")
+    elseif action == "RATE" then
+        payload = payload .. "\t" .. tostring(rate or 1.0) .. "\t" .. (targetName or "")
+    elseif action == "QUERY" then
+        payload = payload .. "\t" .. tostring(level or 0) .. "\t" .. (targetName or "")
+    else
+        payload = payload .. "\t" .. (targetName or "")
     end
 
     local inGroup = (GetNumPartyMembers() > 0) or (GetNumRaidMembers() > 0)
@@ -626,18 +630,26 @@ function TurtleBotXpLock_OnPartyRowToggle(partyIndex)
     local name = UnitName(unit)
     if not name then return end
 
-    TargetUnit(unit)
     local pData = partyBotStatus[partyIndex]
     local isCurrentlyLocked = pData and (pData.isLocked == 1 or pData.xpRate <= 0)
 
+    -- Look up cached GUID from registry if available
+    local targetGuid = 0
+    for b = 1, table.getn(registryBots) do
+        if registryBots[b] and registryBots[b].name == name then
+            targetGuid = registryBots[b].guid or 0
+            break
+        end
+    end
+
     if isCurrentlyLocked then
-        SendModuleMessage("UNLOCK", 0, 0, nil, true)
+        SendModuleMessage("UNLOCK", targetGuid, 0, nil, true, name)
         if pData then pData.isLocked = 0 end
         local toggleBtn = getglobal("Turtle_BotXpLock_PartyRow" .. partyIndex .. "ToggleBtn")
         if toggleBtn then toggleBtn:SetText("Freeze") end
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Unlocked XP for |cffffd100" .. name .. "|r.")
     else
-        SendModuleMessage("LOCK", 0, 0, nil, true)
+        SendModuleMessage("LOCK", targetGuid, 0, nil, true, name)
         if pData then pData.isLocked = 1 end
         local toggleBtn = getglobal("Turtle_BotXpLock_PartyRow" .. partyIndex .. "ToggleBtn")
         if toggleBtn then toggleBtn:SetText("Unlock") end
