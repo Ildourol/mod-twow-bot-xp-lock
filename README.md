@@ -1,39 +1,37 @@
-# Bot XP Lock & Rate Controller for Turtle WoW (`mod-twow-bot-xp-lock`)
+# Player & Bot XP Controller for Turtle WoW (mod-twow-bot-xp-lock)
 
-[![Turtle WoW](https://img.shields.io/badge/Turtle_WoW-1.18.1%20%2F%201.12.1-orange.svg)](https://turtle-wow.org)
-[![Core](https://img.shields.io/badge/Core-tortoise--wow%20(vMaNGOS)-blue.svg)](https://github.com/tortoise-wow/tortoise-wow)
-[![Bot Engine](https://img.shields.io/badge/Bot%20Engine-TortoiseBots%20%7C%20PlayerBots-brightgreen.svg)](https://github.com/Sagiroth/TortoiseBots)
-[![Architecture](https://img.shields.io/badge/Architecture-Non--Intrusive%20XP%20Lock%20%26%20Rate-purple.svg)]()
-[![Compliance](https://img.shields.io/badge/Unediting%20Doctrine-100%25%20Clean-brightgreen.svg)]()
+A standalone, non-intrusive player and bot XP locking, level capping, and rate management module with an accompanying client AddOn for Turtle WoW custom vMaNGOS (tortoise-wow client 1.18.1 / 1.12.1) and TortoiseBots.
 
-A standalone, non-intrusive bot and companion XP locking and rate controller module with an accompanying client AddOn for **Turtle WoW custom vMaNGOS (`tortoise-wow`)** and **`TortoiseBots`**.
+Allows players to freeze individual player or bot XP, set twink bracket caps (19, 29, 39, 49, 59), set custom level caps (1-60), or set granular per-unit XP rates (e.g. 0.25x, 0.5x, 1.0x, 2.0x, 3.0x) with one click via an in-game graphical controller panel, circular minimap button, or chat slash commands. 
 
-Allows players to **freeze individual bot XP**, **set twink bracket caps (19, 29, 39, 49, 59)**, **set custom level caps (1–60)**, or **set granular per-bot XP rates (e.g. 0.25x, 0.5x, 1.0x, 2.0x, 3.0x)** with one click via an in-game graphical controller panel, circular minimap button, or chat slash commands. Includes a dedicated **Configured Bots Registry Side Panel** to view and target all bots saved in the database with custom locks and rates.
+Includes a dedicated Configured Player/Bot Registry Side Panel to inspect, freeze, unfreeze, delete, or target entries directly from the database without requiring world target selection.
 
 ---
 
-## 🌟 Key Features
+## Features
 
 ```mermaid
 flowchart TD
     subgraph ClientAddon ["Client AddOn (addon/Turtle_BotXpLock/)"]
-        UI["Bot XP Controller Panel"]
-        SideRegistry["Configured Bots Registry Side Panel"]
-        Minimap["31x31 Circular Minimap Button"]
+        UI["Player & Bot XP Controller Panel"]
+        SideRegistry["Configured Player/Bot Registry"]
+        PartyRoster["Party Companion Roster (Target-Free)"]
+        Minimap["Circular Minimap Button"]
         Slash["Slash Commands (/xplock, /botxplock)"]
         WireSend["SendAddonMessage('TW_BOT_XPLOCK')"]
 
         UI --> WireSend
         SideRegistry --> WireSend
+        PartyRoster --> WireSend
         Minimap --> UI
         Slash --> UI
     end
 
     subgraph ServerModule ["Standalone Module (mod-twow-bot-xp-lock)"]
-        PacketHook["ServerScript::CanPacketReceive<br/>(Intercepts LANG_ADDON TW_BOT_XPLOCK)"]
-        CmdHook["AllCommandScript::CanExecuteCommand<br/>(Handles .botxplock commands)"]
+        PacketHook["ServerScript::CanPacketReceive<br/>(High-speed opcode filter)"]
+        CmdHook["AllCommandScript::CanExecuteCommand<br/>(Handles .botxplock)"]
         LockMgr["BotXpLockMgr (Thread-Safe RAM Cache)"]
-        XPHook["PlayerScript::OnGiveXP<br/>(Zeroes or scales amount by xpRate)"]
+        XPHook["PlayerScript::OnGiveXP<br/>(Atomic single-pass rate scaling)"]
         LevelHook["PlayerScript::OnLevelChanged<br/>(Anti-Sync Ding Clamping)"]
         DB["tw_char.bot_xp_locks<br/>(Persistent MariaDB/MySQL Schema)"]
 
@@ -54,79 +52,129 @@ flowchart TD
 ```
 
 1. **Strict Immutability (The Unediting Doctrine)**:
-   * 100% standalone module space. Zero modifications, patches, or edits to `tortoise-wow` or `TortoiseBots`.
-2. **Individual Per-Bot XP Freezing & Level Caps**:
-   * **Freeze XP Now**: Locks bot at its exact current level (0x XP).
-   * **Twink Bracket Caps (19, 29, 39, 49, 59)**: Quick-cap buttons for standard PvP brackets.
-   * **Custom Level Cap (1–60)**: Numeric input box and "Set Custom Cap" button to stop leveling at any arbitrary level.
-   * **Automatic Lock on Ding**: Bot levels naturally until reaching the target cap, where XP is automatically locked and the master is notified.
-3. **Granular Individual XP Rates**:
-   * Sets individual XP rate multipliers per bot (e.g., `0.25x` very slow, `0.5x` half-speed leveling, `1.0x` normal, `2.0x` double, `3.0x` triple).
-   * Modifies XP directly in `PlayerScript::OnGiveXP(Player* player, uint32& amount, Unit* victim)`.
-4. **Configured Bots Registry Side Panel**:
-   * Toggleable side window listing all bots saved in `bot_xp_locks` with their level, lock state, and custom rate.
-   * Paged display (`< Prev` / `Next >`) with direct click-to-target selection button for each entry.
-5. **Triple-Layer XP Suppression**:
-   * **Layer 1 (`PlayerScript::OnGiveXP`)**: Passes `amount` by reference. When locked, `amount = 0` causes `Player::GiveXP` to return immediately (`if (xp < 1) return;`), blocking kill XP, quest XP, and discovery XP.
-   * **Layer 2 (Native Core Flag)**: Invokes `bot->SetXPGain(false)` natively, suppressing exploration XP and `SMSG_LOG_XPGAIN` packet distribution.
-   * **Layer 3 (Anti-Sync Ding Protection)**: In `TortoiseBots`, `AiPlayerbot.SyncAltLevelToMaster` can force alt bots to ding to match their master. `BotXpLockMgr::OnLevelChanged` detects any ding exceeding the locked cap and immediately clamps the bot back to its target bracket level with fresh stats and zero excess XP.
-6. **Optimized, Silent Client AddOn (`Turtle_BotXpLock`)**:
-   * Strict Vanilla 1.12.1 / Lua 5.0 runtime compliance (zero `#` length operators, zero `%` modulo operators, zero `string.match`).
-   * **Silent Polling**: Targeting or selecting bots performs 100% silent wire queries (`SendAddonMessage`); zero chat frame spam upon clicking players or bots.
-   * **Resource Efficient**: No background `OnUpdate` polling loops; queries only run when the controller window is actively open.
-   * **Minimap Button**: Circular 31x31 Vanilla standard icon with drag positioning and tooltips (Left-Click to quick-toggle targeted bot XP, Right-Click / Shift-Click to open controller).
+   * 100% standalone module space. Zero modifications, patches, or edits to `tortoise-wow` core sources or `TortoiseBots`.
+2. **Target-Free Party Companion Roster & Registry**:
+   * Manage party companions and registered units directly. Clicking Freeze, Unlock, or Delete executes directly by character name and GUID without changing or dropping your active world target.
+3. **Zero Resource Overhead When Inactive**:
+   * Zero background `OnUpdate` polling loops.
+   * Addon communication and queries run strictly when the controller panel is open. When closed, network and client CPU usage is zero.
+   * High-speed `m_locks.empty()` single-pass fast-path in core XP hooks ensures 0ns overhead for standard server gameplay.
+4. **Individual XP Freezing & Level Caps**:
+   * **Freeze XP Now**: Locks XP immediately at the current level (0x XP).
+   * **Twink Bracket Caps (19, 29, 39, 49, 59)**: One-click presets for classic PvP brackets.
+   * **Custom Level Cap (1-60)**: Custom numeric level cap to stop leveling at any arbitrary level.
+   * **Automatic Lock on Ding**: Units level normally until reaching the designated cap, then automatically lock with chat notification.
+5. **Granular Multiplier Rates**:
+   * Configure individual multipliers (e.g., 0.25x, 0.5x, 1.0x, 1.5x, 2.0x, 3.0x) evaluated atomically in `PlayerScript::OnGiveXP`.
+6. **Multi-Layer XP Suppression**:
+   * **Hook Layer (`PlayerScript::OnGiveXP`)**: Zeros XP amount by reference, immediately returning from core `Player::GiveXP` before awarding kill, quest, or discovery XP.
+   * **Native Core Layer**: Toggles `bot->SetXPGain(false)` natively to silence client XP bar animation and log packets.
+   * **Anti-Sync Ding Clamping**: Intercepts external level synchronization (such as `AiPlayerbot.SyncAltLevelToMaster`) to prevent bots from dinging beyond their locked cap.
+7. **Clean Vanilla 1.12.1 AddOn**:
+   * Full Lua 5.0 compatibility with draggable circular minimap button, tooltips, and chat feedback.
 
 ---
 
-## 💻 Commands
+## Installation
 
-Players and Game Masters can manage bot XP locks and rates using either the graphical controller panel or chat slash commands:
+### 1. Server Module Installation
+
+1. Copy or clone this repository into your core `modules` directory:
+   ```bash
+   git clone https://github.com/Ildourol/mod-twow-bot-xp-lock.git Source/tortoise-wow/modules/mod-twow-bot-xp-lock
+   ```
+
+2. Reconfigure CMake and compile:
+   * **Windows (Visual Studio / MSBuild)**:
+     Open your CMake build directory or run CMake GUI, ensure `mod-twow-bot-xp-lock` is enabled, and build the solution (or build target `mangosd.vcxproj`).
+   * **Linux**:
+     ```bash
+     cd Source/tortoise-wow/build
+     cmake .. -DBUILD_MANGOSD=ON
+     make -j$(nproc)
+     ```
+
+3. Deploy configuration:
+   Copy `conf/mod-twow-bot-xp-lock.conf.dist` to your server's configuration directory (e.g. `Server/etc/modules/mod-twow-bot-xp-lock.conf` or `Server/etc/mod-twow-bot-xp-lock.conf`).
+
+### 2. Database Installation
+
+The module automatically checks and creates the required database table on first startup.
+
+If you prefer to import the schema manually into your character database (`tw_char`):
+```bash
+mysql -u root -p tw_char < data/sql/character/characters_bot_xp_locks.sql
+```
+
+### 3. Client AddOn Installation
+
+1. Copy the folder `addon/Turtle_BotXpLock` into your game client's addon directory:
+   ```text
+   <WoW Directory>/Interface/AddOns/Turtle_BotXpLock/
+   ```
+2. Verify that the files are structured as:
+   ```text
+   Interface/AddOns/Turtle_BotXpLock/Turtle_BotXpLock.toc
+   Interface/AddOns/Turtle_BotXpLock/Turtle_BotXpLock.lua
+   Interface/AddOns/Turtle_BotXpLock/Turtle_BotXpLock.xml
+   ```
+3. Enable **Turtle_BotXpLock** in the in-game AddOn selection list at character select (check "Load out of date AddOns" if needed).
+
+---
+
+## Commands
+
+Commands can be executed via in-game chat or the graphical controller interface:
 
 | Command | Description |
 | :--- | :--- |
-| `/xplock` or `/botxplock` | Opens or closes the Bot XP Controller panel. |
-| `/xplock lock` or `.botxplock lock` | Locks XP immediately for the targeted bot at its current level (0x XP). |
-| `/xplock lock <level>` or `.botxplock lock <level>` | Sets a custom level cap (e.g. `19`, `29`, `39`, `49`, `59`, or any level 1–60). |
-| `/xplock rate <mult>` or `.botxplock rate <mult>` | Sets individual XP rate (e.g. `0.5` for half XP, `2.0` for double XP). |
-| `/xplock unlock` or `.botxplock unlock` | Restores normal XP progression (1.0x) for the targeted bot. |
-| `/xplock list` or `.botxplock list` | Opens the Configured Bot Registry panel (or prints in chat for GM console). |
-| `.botxplock status` | Queries detailed XP status, rate, and progression for the targeted bot. |
+| `/xplock` or `/botxplock` | Opens or closes the Main Controller panel. |
+| `.botxplock status [guid\|name]` | Displays XP lock status, active rate, and progression for the specified unit or current target. |
+| `.botxplock toggle [guid\|name]` | Toggles XP freeze / unlock state. |
+| `.botxplock lock [guid\|name] [level]` | Freezes XP immediately or sets a level cap for the specified unit or target. |
+| `.botxplock unlock [guid\|name]` | Unlocks XP and restores normal progression for the specified unit or target. |
+| `.botxplock rate [guid\|name] <multiplier>` | Sets custom XP multiplier (e.g. `0.5`, `1.5`, `2.0`). |
+| `.botxplock delete [guid\|name]` | Removes entry from database and resets unit to default unlocked 1.0x rate. |
+| `.botxplock list` | Lists all configured units in console or chat. |
+| `.botxplock reload` | Reloads module configuration and database locks without restarting the server. |
 
 ---
 
-## ⚙️ Configuration (`conf/mod-twow-bot-xp-lock.conf.dist`)
+## Configuration (`mod-twow-bot-xp-lock.conf`)
 
 ```ini
 [BotXpLock]
-# Master switch for the module (1 = enabled, 0 = disabled)
+
+# Enable or disable the Bot XP Lock system (1 = enabled, 0 = disabled)
 BotXpLock.Enable = 1
 
-# Restrict XP locking and rate modifications to bots in the player's group (1 = yes, 0 = no)
+# If set to 1, players can only lock/unlock XP for bots in their party or raid
 BotXpLock.PartyOnly = 0
 
-# Allow players to set custom numeric level caps between 1 and 60 (1 = yes, 0 = no)
+# Allow players to set custom future level caps (1 = enabled, 0 = disabled)
 BotXpLock.AllowCustomCap = 1
 
-# Automatically clamp alt-sync dings back to the bot's configured level cap (1 = yes, 0 = no)
+# Automatically clamp alt-sync dings beyond the configured level cap
 BotXpLock.ClampAltSyncDing = 1
 
-# Send a chat notification to the master player when a bot reaches its level cap and locks (1 = yes, 0 = no)
+# Send an in-game system message feedback when locking or unlocking bot XP
 BotXpLock.NotifyOnLock = 1
+
+# Enable diagnostic debug logging for Bot XP Lock
+BotXpLock.Debug = 1
 ```
 
 ---
 
-## 🗄️ Database Schema (`data/sql/character/characters_bot_xp_locks.sql`)
-
-The module automatically creates and manages table `bot_xp_locks` in the character database (`tw_char`):
+## Database Schema (`tw_char.bot_xp_locks`)
 
 ```sql
 CREATE TABLE IF NOT EXISTS `bot_xp_locks` (
-    `guid` INT UNSIGNED NOT NULL COMMENT 'Character low GUID of the bot',
+    `guid` INT UNSIGNED NOT NULL COMMENT 'Character low GUID',
     `locked` TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '1 = locked, 0 = unlocked',
     `lock_level` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0 = lock at current level; >0 = cap at this level',
     `locked_at_level` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Level when lock was applied',
-    `xp_rate` FLOAT NOT NULL DEFAULT 1.0 COMMENT 'Individual bot XP rate multiplier (e.g. 0.5, 1.0, 2.0)',
+    `xp_rate` FLOAT NOT NULL DEFAULT 1.0 COMMENT 'Individual XP rate multiplier (e.g. 0.5, 1.0, 2.0)',
     `locked_by_guid` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Player low GUID who applied the lock',
     `locked_at` DATETIME NULL COMMENT 'Timestamp when lock was last modified',
     PRIMARY KEY (`guid`)
@@ -135,9 +183,6 @@ CREATE TABLE IF NOT EXISTS `bot_xp_locks` (
 
 ---
 
-## 📦 Installation
+## License
 
-1. Place `mod-twow-bot-xp-lock` in `Source/tortoise-wow/modules/mod-twow-bot-xp-lock`.
-2. Configure CMake with `-DMODULES=static` and build the server.
-3. Copy `conf/mod-twow-bot-xp-lock.conf.dist` to `Server/etc/modules/mod-twow-bot-xp-lock.conf`.
-4. Copy `addon/Turtle_BotXpLock` into your game client's `Interface/AddOns/` directory.
+This project is licensed under the same open-source terms as the Turtle WoW vMaNGOS ecosystem.
