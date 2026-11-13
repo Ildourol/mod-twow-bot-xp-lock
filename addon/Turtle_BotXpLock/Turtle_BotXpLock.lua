@@ -18,8 +18,20 @@ local QUERY_COOLDOWN = 0.4 -- 400ms cooldown to avoid spamming server
 
 -- Helper function: Returns true ONLY when the Controller Panel or Registry is actively open on screen
 local function IsPanelOpen()
-    return (Turtle_BotXpLockFrame and Turtle_BotXpLockFrame:IsShown()) or (Turtle_BotXpLock_RegistryFrame and Turtle_BotXpLock_RegistryFrame:IsShown())
+    return (Turtle_BotXpLockFrame and Turtle_BotXpLockFrame:IsVisible()) or (Turtle_BotXpLock_RegistryFrame and Turtle_BotXpLock_RegistryFrame:IsVisible())
 end
+
+-- Helper function: Safely closes the Controller Panel and side Registry
+local function CloseControllerPanel()
+    if Turtle_BotXpLock_RegistryFrame then
+        Turtle_BotXpLock_RegistryFrame:Hide()
+    end
+    if Turtle_BotXpLockFrame then
+        HideUIPanel(Turtle_BotXpLockFrame)
+        Turtle_BotXpLockFrame:Hide()
+    end
+end
+TurtleBotXpLock_Close = CloseControllerPanel
 
 -- -----------------------------------------------------------------------------
 -- 1. Helper Utilities (Strict Lua 5.0)
@@ -93,6 +105,9 @@ ChatFrame_OnEvent = function(event)
                     Turtle_BotXpLock_UnlockButton:Enable()
                 end
             end
+
+            -- Suppress internal status query message from flooding the chat box
+            return
         end
     end
 
@@ -104,7 +119,7 @@ for i = 1, 7 do
     if cf and cf.AddMessage then
         local origAdd = cf.AddMessage
         cf.AddMessage = function(this, msg, r, g, b, id)
-            if type(msg) == "string" and (string.find(msg, "%.botxplock") or string.find(msg, "Target a companion bot first") or string.find(msg, "Usage:.*%.botxplock")) then
+            if type(msg) == "string" and (string.find(msg, "%.botxplock") or string.find(msg, "Target a companion bot first") or string.find(msg, "Usage:.*%.botxplock") or (IsPanelOpen() and string.find(msg, "XP Status:"))) then
                 return
             end
             origAdd(this, msg, r, g, b, id)
@@ -764,7 +779,7 @@ minimapBtn:SetScript("OnClick", function()
 
     -- Left-Click opens/closes the Main Controller Panel
     if IsPanelOpen() then
-        HideUIPanel(Turtle_BotXpLockFrame)
+        CloseControllerPanel()
     else
         ShowUIPanel(Turtle_BotXpLockFrame)
         TurtleBotXpLock_Refresh()
@@ -856,6 +871,12 @@ eventFrame:SetScript("OnEvent", function()
 end)
 
 function TurtleBotXpLock_OnLoad()
+    if Turtle_BotXpLockFrame then
+        Turtle_BotXpLockFrame:Hide()
+    end
+    if Turtle_BotXpLock_RegistryFrame then
+        Turtle_BotXpLock_RegistryFrame:Hide()
+    end
     for i = 1, 4 do
         local row = getglobal("Turtle_BotXpLock_PartyRow" .. i)
         if row then row:Hide() end
@@ -876,7 +897,7 @@ SLASH_TURTLEBOTXPLOCK2 = "/xplock"
 SlashCmdList["TURTLEBOTXPLOCK"] = function(msg)
     if not msg or msg == "" then
         if IsPanelOpen() then
-            HideUIPanel(Turtle_BotXpLockFrame)
+            CloseControllerPanel()
         else
             ShowUIPanel(Turtle_BotXpLockFrame)
             TurtleBotXpLock_Refresh()

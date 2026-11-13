@@ -205,7 +205,7 @@
                 </Anchors>
                 <Scripts>
                     <OnClick>
-                        HideUIPanel(this:GetParent())
+                        TurtleBotXpLock_Close()
                     </OnClick>
                 </Scripts>
             </Button>
@@ -462,7 +462,7 @@
                 </Anchors>
                 <Scripts>
                     <OnClick>
-                        HideUIPanel(this:GetParent())
+                        TurtleBotXpLock_Close()
                     </OnClick>
                 </Scripts>
             </Button>
