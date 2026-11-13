@@ -54,9 +54,9 @@
         </Scripts>
     </Frame>
 
-    <!-- Registry Bot Row Template (340 x 26) -->
+    <!-- Registry Bot Row Template (430 x 26) -->
     <Frame name="TurtleBotXpLockRegistryRowTemplate" virtual="true">
-        <Size><AbsDimension x="340" y="26"/></Size>
+        <Size><AbsDimension x="430" y="26"/></Size>
         <Backdrop bgFile="Interface\Tooltips\UI-Tooltip-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
             <EdgeSize><AbsValue val="8"/></EdgeSize>
             <TileSize><AbsValue val="8"/></TileSize>
@@ -65,19 +65,19 @@
         <Layers>
             <Layer level="ARTWORK">
                 <FontString name="$parentName" inherits="GameFontNormalSmall" justifyH="LEFT" text="">
-                    <Size><AbsDimension x="110" y="16"/></Size>
+                    <Size><AbsDimension x="105" y="16"/></Size>
                     <Anchors>
                         <Anchor point="LEFT"><Offset><AbsDimension x="8" y="0"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
                 <FontString name="$parentLevel" inherits="GameFontHighlightSmall" justifyH="CENTER" text="">
-                    <Size><AbsDimension x="45" y="16"/></Size>
+                    <Size><AbsDimension x="38" y="16"/></Size>
                     <Anchors>
                         <Anchor point="LEFT" relativeTo="$parentName" relativePoint="RIGHT"><Offset><AbsDimension x="2" y="0"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
                 <FontString name="$parentStatus" inherits="GameFontHighlightSmall" justifyH="CENTER" text="">
-                    <Size><AbsDimension x="95" y="16"/></Size>
+                    <Size><AbsDimension x="85" y="16"/></Size>
                     <Anchors>
                         <Anchor point="LEFT" relativeTo="$parentLevel" relativePoint="RIGHT"><Offset><AbsDimension x="2" y="0"/></Offset></Anchor>
                     </Anchors>
@@ -85,14 +85,36 @@
             </Layer>
         </Layers>
         <Frames>
-            <Button name="$parentTargetBtn" inherits="UIPanelButtonTemplate" text="Select">
-                <Size><AbsDimension x="55" y="18"/></Size>
+            <Button name="$parentFreezeBtn" inherits="UIPanelButtonTemplate" text="Freeze">
+                <Size><AbsDimension x="52" y="18"/></Size>
                 <Anchors>
-                    <Anchor point="RIGHT"><Offset><AbsDimension x="-6" y="0"/></Offset></Anchor>
+                    <Anchor point="RIGHT"><Offset><AbsDimension x="-122" y="0"/></Offset></Anchor>
                 </Anchors>
                 <Scripts>
                     <OnClick>
-                        TurtleBotXpLock_OnRegistryRowSelect(this:GetParent():GetID())
+                        TurtleBotXpLock_OnRegistryRowFreeze(this:GetParent():GetID())
+                    </OnClick>
+                </Scripts>
+            </Button>
+            <Button name="$parentUnlockBtn" inherits="UIPanelButtonTemplate" text="Unlock">
+                <Size><AbsDimension x="52" y="18"/></Size>
+                <Anchors>
+                    <Anchor point="RIGHT"><Offset><AbsDimension x="-68" y="0"/></Offset></Anchor>
+                </Anchors>
+                <Scripts>
+                    <OnClick>
+                        TurtleBotXpLock_OnRegistryRowUnlock(this:GetParent():GetID())
+                    </OnClick>
+                </Scripts>
+            </Button>
+            <Button name="$parentDeleteBtn" inherits="UIPanelButtonTemplate" text="Delete">
+                <Size><AbsDimension x="55" y="18"/></Size>
+                <Anchors>
+                    <Anchor point="RIGHT"><Offset><AbsDimension x="-8" y="0"/></Offset></Anchor>
+                </Anchors>
+                <Scripts>
+                    <OnClick>
+                        TurtleBotXpLock_OnRegistryRowDelete(this:GetParent():GetID())
                     </OnClick>
                 </Scripts>
             </Button>
@@ -106,7 +128,7 @@
 
     <!-- Main Controller Frame -->
     <Frame name="Turtle_BotXpLockFrame" toplevel="true" movable="true" enableMouse="true" hidden="true" parent="UIParent">
-        <Size><AbsDimension x="340" y="575"/></Size>
+        <Size><AbsDimension x="340" y="615"/></Size>
         <Anchors>
             <Anchor point="CENTER"><Offset><AbsDimension x="0" y="20"/></Offset></Anchor>
         </Anchors>
@@ -134,19 +156,19 @@
                 </FontString>
 
                 <!-- Target Section Header -->
-                <FontString name="Turtle_BotXpLock_TargetHeader" inherits="GameFontHighlightSmall" text="CURRENT TARGET BOT:" justifyH="LEFT">
+                <FontString name="Turtle_BotXpLock_TargetHeader" inherits="GameFontHighlightSmall" text="CURRENT TARGET (PLAYER/BOT):" justifyH="LEFT">
                     <Anchors>
                         <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-36"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
 
-                <!-- Target Bot Name & Level -->
-                <FontString name="Turtle_BotXpLock_TargetName" inherits="GameFontNormalLarge" text="No Target" justifyH="LEFT">
+                <!-- Target Player/Bot Name & Level -->
+                <FontString name="Turtle_BotXpLock_TargetName" inherits="GameFontNormalLarge" text="No Player/Bot Selected" justifyH="LEFT">
                     <Anchors>
                         <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-52"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
-                <FontString name="Turtle_BotXpLock_TargetInfo" inherits="GameFontHighlightSmall" text="Select a companion or friendly bot" justifyH="LEFT">
+                <FontString name="Turtle_BotXpLock_TargetInfo" inherits="GameFontHighlightSmall" text="Select a friendly Player/Bot or companion" justifyH="LEFT">
                     <Anchors>
                         <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-72"/></Offset></Anchor>
                     </Anchors>
@@ -162,14 +184,14 @@
                 <!-- Twink Bracket Cap Header -->
                 <FontString name="Turtle_BotXpLock_CapHeader" inherits="GameFontNormalSmall" text="Quick Twink Bracket Caps:" justifyH="LEFT">
                     <Anchors>
-                        <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-220"/></Offset></Anchor>
+                        <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-248"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
 
                 <!-- Party Roster Section Header (Moved down to give generous space below custom cap) -->
                 <FontString name="Turtle_BotXpLock_RosterHeader" inherits="GameFontNormalSmall" text="Party Companion Roster:" justifyH="LEFT">
                     <Anchors>
-                        <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-308"/></Offset></Anchor>
+                        <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-336"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
             </Layer>
@@ -291,11 +313,32 @@
                 </Scripts>
             </Button>
 
+            <!-- Custom XP Rate Multiplier Input Box & Set Button -->
+            <EditBox name="Turtle_BotXpLock_CustomRateBox" autoFocus="false" inherits="InputBoxTemplate">
+                <Size><AbsDimension x="50" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="TOPLEFT"><Offset><AbsDimension x="25" y="-210"/></Offset></Anchor>
+                </Anchors>
+                <Scripts>
+                    <OnEscapePressed>this:ClearFocus()</OnEscapePressed>
+                    <OnEnterPressed>TurtleBotXpLock_OnCustomRateSet()</OnEnterPressed>
+                </Scripts>
+            </EditBox>
+            <Button name="Turtle_BotXpLock_CustomRateButton" inherits="UIPanelButtonTemplate" text="Set Custom Rate">
+                <Size><AbsDimension x="120" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="Turtle_BotXpLock_CustomRateBox" relativePoint="RIGHT"><Offset><AbsDimension x="10" y="0"/></Offset></Anchor>
+                </Anchors>
+                <Scripts>
+                    <OnClick>TurtleBotXpLock_OnCustomRateSet()</OnClick>
+                </Scripts>
+            </Button>
+
             <!-- Twink Bracket Quick-Cap Buttons (19, 29, 39, 49, 59) -->
             <Button name="Turtle_BotXpLock_Cap19" inherits="UIPanelButtonTemplate" text="Cap 19" id="19">
                 <Size><AbsDimension x="54" y="22"/></Size>
                 <Anchors>
-                    <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-240"/></Offset></Anchor>
+                    <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-268"/></Offset></Anchor>
                 </Anchors>
                 <Scripts>
                     <OnClick>TurtleBotXpLock_OnCapClick(19)</OnClick>
@@ -346,7 +389,7 @@
             <EditBox name="Turtle_BotXpLock_CustomCapBox" autoFocus="false" inherits="InputBoxTemplate" numeric="true">
                 <Size><AbsDimension x="50" y="22"/></Size>
                 <Anchors>
-                    <Anchor point="TOPLEFT"><Offset><AbsDimension x="25" y="-270"/></Offset></Anchor>
+                    <Anchor point="TOPLEFT"><Offset><AbsDimension x="25" y="-298"/></Offset></Anchor>
                 </Anchors>
                 <Scripts>
                     <OnEscapePressed>this:ClearFocus()</OnEscapePressed>
@@ -366,7 +409,7 @@
             <!-- Party Roster Rows 1..4 (Shifted down) -->
             <Frame name="Turtle_BotXpLock_PartyRow1" inherits="TurtleBotXpLockPartyRowTemplate" id="1">
                 <Anchors>
-                    <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-330"/></Offset></Anchor>
+                    <Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-358"/></Offset></Anchor>
                 </Anchors>
             </Frame>
             <Frame name="Turtle_BotXpLock_PartyRow2" inherits="TurtleBotXpLockPartyRowTemplate" id="2">
@@ -386,7 +429,7 @@
             </Frame>
 
             <!-- Toggle All Configured Bots Registry Button -->
-            <Button name="Turtle_BotXpLock_ToggleRegistryButton" inherits="UIPanelButtonTemplate" text="All Configured Bots >>">
+            <Button name="Turtle_BotXpLock_ToggleRegistryButton" inherits="UIPanelButtonTemplate" text="Configured Players/Bots >>">
                 <Size><AbsDimension x="170" y="22"/></Size>
                 <Anchors>
                     <Anchor point="TOPLEFT" relativeTo="Turtle_BotXpLock_PartyRow4" relativePoint="BOTTOMLEFT"><Offset><AbsDimension x="0" y="-12"/></Offset></Anchor>
@@ -441,7 +484,7 @@
 
     <!-- Side Registry Frame (All Bots with Custom XP Locks / Rates) -->
     <Frame name="Turtle_BotXpLock_RegistryFrame" toplevel="true" movable="false" enableMouse="true" hidden="true" parent="Turtle_BotXpLockFrame">
-        <Size><AbsDimension x="360" y="575"/></Size>
+        <Size><AbsDimension x="450" y="615"/></Size>
         <Anchors>
             <Anchor point="TOPLEFT" relativeTo="Turtle_BotXpLockFrame" relativePoint="TOPRIGHT"><Offset><AbsDimension x="4" y="0"/></Offset></Anchor>
         </Anchors>
@@ -453,17 +496,17 @@
 
         <Layers>
             <Layer level="ARTWORK">
-                <FontString name="Turtle_BotXpLock_RegistryTitle" inherits="GameFontNormal" text="Configured Bot XP Registry">
+                <FontString name="Turtle_BotXpLock_RegistryTitle" inherits="GameFontNormal" text="Configured Player/Bot XP Registry">
                     <Anchors>
                         <Anchor point="TOP"><Offset><AbsDimension x="0" y="-18"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
-                <FontString name="Turtle_BotXpLock_RegistrySubtitle" inherits="GameFontHighlightSmall" text="All bots saved in database with custom lock/rate" justifyH="CENTER">
+                <FontString name="Turtle_BotXpLock_RegistrySubtitle" inherits="GameFontHighlightSmall" text="All Players/Bots saved in database with custom lock/rate" justifyH="CENTER">
                     <Anchors>
                         <Anchor point="TOP"><Offset><AbsDimension x="0" y="-36"/></Offset></Anchor>
                     </Anchors>
                 </FontString>
-                <FontString name="Turtle_BotXpLock_RegistryCount" inherits="GameFontNormalSmall" text="Total: 0 bots configured" justifyH="LEFT">
+                <FontString name="Turtle_BotXpLock_RegistryCount" inherits="GameFontNormalSmall" text="Total: 0 configured" justifyH="LEFT">
                     <Anchors>
                         <Anchor point="TOPLEFT"><Offset><AbsDimension x="18" y="-56"/></Offset></Anchor>
                     </Anchors>
@@ -519,16 +562,23 @@
                 <Anchors><Anchor point="TOPLEFT" relativeTo="Turtle_BotXpLock_RegRow9" relativePoint="BOTTOMLEFT"><Offset><AbsDimension x="0" y="-3"/></Offset></Anchor></Anchors>
             </Frame>
 
-            <!-- Navigation Buttons (Prev / Next Page) -->
+            <!-- Navigation Buttons (Prev / Refresh / Next Page) -->
             <Button name="Turtle_BotXpLock_RegPrevBtn" inherits="UIPanelButtonTemplate" text="&lt; Prev">
-                <Size><AbsDimension x="70" y="22"/></Size>
+                <Size><AbsDimension x="65" y="22"/></Size>
                 <Anchors><Anchor point="BOTTOMLEFT"><Offset><AbsDimension x="18" y="16"/></Offset></Anchor></Anchors>
                 <Scripts>
                     <OnClick>TurtleBotXpLock_OnRegistryPage(-1)</OnClick>
                 </Scripts>
             </Button>
-            <Button name="Turtle_BotXpLock_RegNextBtn" inherits="UIPanelButtonTemplate" text="Next &gt;">
+            <Button name="Turtle_BotXpLock_RegRefreshBtn" inherits="UIPanelButtonTemplate" text="Refresh">
                 <Size><AbsDimension x="70" y="22"/></Size>
+                <Anchors><Anchor point="BOTTOM"><Offset><AbsDimension x="65" y="16"/></Offset></Anchor></Anchors>
+                <Scripts>
+                    <OnClick>TurtleBotXpLock_OnRegistryRefresh()</OnClick>
+                </Scripts>
+            </Button>
+            <Button name="Turtle_BotXpLock_RegNextBtn" inherits="UIPanelButtonTemplate" text="Next &gt;">
+                <Size><AbsDimension x="65" y="22"/></Size>
                 <Anchors><Anchor point="BOTTOMRIGHT"><Offset><AbsDimension x="-18" y="16"/></Offset></Anchor></Anchors>
                 <Scripts>
                     <OnClick>TurtleBotXpLock_OnRegistryPage(1)</OnClick>

@@ -101,54 +101,55 @@ public:
 
     bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override
     {
+        // High-frequency fast path: non-chat packets exit in 1 CPU instruction
+        if (packet.GetOpcode() != CMSG_MESSAGECHAT)
+            return true;
+
         if (!sBotXpLockConfig.IsEnabled() || !session || !session->GetPlayer())
             return true;
 
         if (session->IsHeadless())
             return true;
 
-        if (packet.GetOpcode() == CMSG_MESSAGECHAT)
+        try
         {
-            try
+            WorldPacket copy = packet;
+            copy.rpos(0);
+
+            uint32 type = 0;
+            uint32 language = 0;
+            copy >> type >> language;
+
+            if (language == LANG_ADDON)
             {
-                WorldPacket copy = packet;
-                copy.rpos(0);
-
-                uint32 type = 0;
-                uint32 language = 0;
-                copy >> type >> language;
-
-                if (language == LANG_ADDON)
+                std::string msg;
+                if (type == CHAT_MSG_WHISPER)
                 {
-                    std::string msg;
-                    if (type == CHAT_MSG_WHISPER)
-                    {
-                        std::string to;
-                        copy >> to >> msg;
-                    }
-                    else if (type == CHAT_MSG_CHANNEL)
-                    {
-                        std::string channel;
-                        copy >> channel >> msg;
-                    }
-                    else
-                    {
-                        copy >> msg;
-                    }
+                    std::string to;
+                    copy >> to >> msg;
+                }
+                else if (type == CHAT_MSG_CHANNEL)
+                {
+                    std::string channel;
+                    copy >> channel >> msg;
+                }
+                else
+                {
+                    copy >> msg;
+                }
 
-                    std::string const prefixToken = std::string(BotXpLock::ADDON_PREFIX) + "\t";
-                    if (msg.rfind(prefixToken, 0) == 0)
-                    {
-                        Player* sender = session->GetPlayer();
-                        std::string payload = msg.substr(prefixToken.length());
-                        sBotXpLockMgr.HandleAddonMessage(sender, payload);
-                        return false; // Handled! Drop packet so chat handler does not error
-                    }
+                std::string const prefixToken = std::string(BotXpLock::ADDON_PREFIX) + "\t";
+                if (msg.rfind(prefixToken, 0) == 0)
+                {
+                    Player* sender = session->GetPlayer();
+                    std::string payload = msg.substr(prefixToken.length());
+                    sBotXpLockMgr.HandleAddonMessage(sender, payload);
+                    return false; // Handled! Drop packet so chat handler does not error
                 }
             }
-            catch (...)
-            {
-            }
+        }
+        catch (...)
+        {
         }
         return true;
     }

@@ -32,8 +32,14 @@ public:
 
     bool SetLock(uint32 botGuid, bool locked, uint8 lockLevel, uint32 operatorGuid, std::string* outMsg = nullptr);
     bool SetRate(uint32 botGuid, float rate, uint32 operatorGuid, std::string* outMsg = nullptr);
+    bool DeleteLock(uint32 botGuid, uint32 operatorGuid, std::string* outMsg = nullptr);
     bool GetLockEntry(uint32 botGuid, BotXpLock::LockEntry& outEntry) const;
     std::vector<BotXpLock::LockEntry> GetAllLockedBots() const;
+
+    // Query / identification helpers
+    std::string GetBotName(uint32 botGuid) const;
+    uint8 GetBotLevel(uint32 botGuid) const;
+    bool ResolveBot(Player* sender, std::string const& identifier, uint32& outGuid, std::string& outName, uint8& outLevel, Player*& outPlayer) const;
 
     // Ingress communication handlers
     void HandleAddonMessage(Player* sender, std::string const& payload);

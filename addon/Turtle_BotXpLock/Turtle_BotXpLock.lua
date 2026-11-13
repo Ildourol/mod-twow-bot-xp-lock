@@ -11,6 +11,16 @@ local registryBots = {}
 local registryPage = 1
 local ROWS_PER_PAGE = 10
 
+-- Internal cooldown & throttling
+local lastTargetQueryTime = 0
+local lastRosterQueryTime = 0
+local QUERY_COOLDOWN = 0.4 -- 400ms cooldown to avoid spamming server
+
+-- Helper function: Returns true ONLY when the Controller Panel or Registry is actively open on screen
+local function IsPanelOpen()
+    return (Turtle_BotXpLockFrame and Turtle_BotXpLockFrame:IsShown()) or (Turtle_BotXpLock_RegistryFrame and Turtle_BotXpLock_RegistryFrame:IsShown())
+end
+
 -- -----------------------------------------------------------------------------
 -- 1. Helper Utilities (Strict Lua 5.0)
 -- -----------------------------------------------------------------------------
@@ -31,14 +41,61 @@ local function SplitString(str, delim)
 end
 
 -- -----------------------------------------------------------------------------
--- 2. Silent Slash Chat Command Filter
--- Suppresses .botxplock commands and server error echo from chat boxes
+-- 2. Silent Slash Chat Command & Feedback Parser
+-- Suppresses .botxplock command echos and parses target/roster status replies
 -- -----------------------------------------------------------------------------
+-- Forward declarations
+local ApplyStatusData
+local UpdateRegistryDisplay
+
 local origChatFrame_OnEvent = ChatFrame_OnEvent
 ChatFrame_OnEvent = function(event)
     if (event == "CHAT_MSG_SAY" or event == "CHAT_MSG_WHISPER_INFORM" or event == "CHAT_MSG_WHISPER") and type(arg1) == "string" and string.find(arg1, "^%.botxplock%s*") then
         return
     end
+
+    -- Suppress the fallback usage prompt when querying or clicking buttons
+    if (event == "CHAT_MSG_SYSTEM" or event == "CHAT_MSG_SAY") and type(arg1) == "string" and (string.find(arg1, "%.botxplock") or string.find(arg1, "Target a companion bot first") or string.find(arg1, "Usage:.*%.botxplock")) then
+        return
+    end
+
+    -- Parse server system feedback to update target and registry status reliably ONLY when panel is open
+    if IsPanelOpen() and (event == "CHAT_MSG_SYSTEM" or event == "CHAT_MSG_SAY" or event == "CHAT_MSG_WHISPER") and type(arg1) == "string" then
+        if string.find(arg1, "%[BotXpLock%]") or string.find(arg1, "XP Status:") then
+            local text = arg1
+            local tName = UnitName("target")
+
+            -- Check for locked status
+            if string.find(text, "LOCKED") then
+                if tName and (string.find(text, tName) or string.find(text, "XP Status: |cffff2020LOCKED")) then
+                    currentTargetStatus = 1
+                    Turtle_BotXpLock_StatusText:SetText("|cffff2020LOCKED (0x XP)|r")
+                    Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.40, 0.08, 0.08, 0.90)
+                    Turtle_BotXpLock_FreezeButton:Disable()
+                    Turtle_BotXpLock_UnlockButton:Enable()
+                end
+            -- Check for unlocked status
+            elseif string.find(text, "UNLOCKED") or string.find(text, "ACTIVE") then
+                if tName and (string.find(text, tName) or string.find(text, "XP Status: |cff00ff00UNLOCKED")) then
+                    currentTargetStatus = 0
+                    Turtle_BotXpLock_StatusText:SetText("|cff00ff00XP ACTIVE (NORMAL 1.0x)|r")
+                    Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.08, 0.35, 0.08, 0.90)
+                    Turtle_BotXpLock_FreezeButton:Enable()
+                    Turtle_BotXpLock_UnlockButton:Disable()
+                end
+            -- Check for capped status
+            elseif string.find(text, "CAPPED") or string.find(text, "capped") then
+                if tName and (string.find(text, tName) or string.find(text, "XP Status: |cffffa500CAPPED") or string.find(text, "CAPPED at Level")) then
+                    currentTargetStatus = 2
+                    Turtle_BotXpLock_StatusText:SetText("|cffffa500CAPPED (RATE CONTROLLED)|r")
+                    Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.35, 0.25, 0.05, 0.90)
+                    Turtle_BotXpLock_FreezeButton:Enable()
+                    Turtle_BotXpLock_UnlockButton:Enable()
+                end
+            end
+        end
+    end
+
     origChatFrame_OnEvent(event)
 end
 
@@ -47,7 +104,7 @@ for i = 1, 7 do
     if cf and cf.AddMessage then
         local origAdd = cf.AddMessage
         cf.AddMessage = function(this, msg, r, g, b, id)
-            if type(msg) == "string" and string.find(msg, "^%.botxplock%s*") then
+            if type(msg) == "string" and (string.find(msg, "%.botxplock") or string.find(msg, "Target a companion bot first") or string.find(msg, "Usage:.*%.botxplock")) then
                 return
             end
             origAdd(this, msg, r, g, b, id)
@@ -58,29 +115,67 @@ end
 -- -----------------------------------------------------------------------------
 -- 3. Send Wire / Command Messages
 -- -----------------------------------------------------------------------------
-local function SendModuleMessage(action, guid, level, rate, runChatCmd)
+local function SendModuleMessage(action, guid, level, rate, runChatCmd, targetName)
     local cmd = ""
     if action == "LOCK" then
-        if level and level > 0 then
+        if guid and guid > 0 then
+            cmd = "lock " .. tostring(guid) .. " " .. tostring(level or 0)
+        elseif targetName and targetName ~= "" then
+            cmd = "lock " .. targetName .. " " .. tostring(level or 0)
+        elseif level and level > 0 then
             cmd = "lock " .. tostring(level)
         else
             cmd = "lock"
         end
     elseif action == "UNLOCK" then
-        cmd = "unlock"
+        if guid and guid > 0 then
+            cmd = "unlock " .. tostring(guid)
+        elseif targetName and targetName ~= "" then
+            cmd = "unlock " .. targetName
+        else
+            cmd = "unlock"
+        end
     elseif action == "TOGGLE" then
-        cmd = "toggle"
+        if guid and guid > 0 then
+            cmd = "toggle " .. tostring(guid)
+        elseif targetName and targetName ~= "" then
+            cmd = "toggle " .. targetName
+        else
+            cmd = "toggle"
+        end
     elseif action == "RATE" then
-        cmd = "rate " .. tostring(rate or 1.0)
+        if guid and guid > 0 then
+            cmd = "rate " .. tostring(guid) .. " " .. tostring(rate or 1.0)
+        elseif targetName and targetName ~= "" then
+            cmd = "rate " .. targetName .. " " .. tostring(rate or 1.0)
+        else
+            cmd = "rate " .. tostring(rate or 1.0)
+        end
+    elseif action == "DELETE" then
+        if guid and guid > 0 then
+            cmd = "delete " .. tostring(guid)
+        elseif targetName and targetName ~= "" then
+            cmd = "delete " .. targetName
+        else
+            cmd = "delete"
+        end
     elseif action == "LIST_QUERY" then
         cmd = "list"
     elseif action == "QUERY" then
-        cmd = "status"
+        if guid and guid > 0 then
+            cmd = "status " .. tostring(guid)
+        elseif targetName and targetName ~= "" then
+            cmd = "status " .. targetName
+        else
+            cmd = "status"
+        end
     end
 
     -- 1. Try Addon wire message if in group/raid
     local payload = action .. "\t" .. tostring(guid or 0) .. "\t" .. tostring(level or 0)
-    if rate then
+    if action == "QUERY" and targetName and targetName ~= "" then
+        payload = payload .. "\t" .. targetName
+    elseif rate then
         payload = payload .. "\t" .. tostring(rate)
     end
 
@@ -89,9 +184,8 @@ local function SendModuleMessage(action, guid, level, rate, runChatCmd)
         SendAddonMessage(ADDON_PREFIX, payload, "PARTY")
     end
 
-    -- 2. Send slash command directly if runChatCmd is true OR if solo (not grouped)
-    -- This guarantees immediate server reception and execution in ALL situations!
-    if cmd ~= "" and (runChatCmd or not inGroup) then
+    -- 2. Send slash command directly if runChatCmd is true OR if solo (not grouped) OR if querying status
+    if cmd ~= "" and (runChatCmd or not inGroup or action == "QUERY") then
         SendChatMessage(".botxplock " .. cmd, "SAY")
     end
 end
@@ -100,12 +194,16 @@ end
 -- 4. UI View Updaters
 -- -----------------------------------------------------------------------------
 local function UpdateTargetDisplay()
+    if not IsPanelOpen() then
+        return
+    end
+
     local name = UnitName("target")
-    if not name or not UnitIsPlayer("target") or not UnitIsFriend("player", "target") then
+    if not name or not UnitExists("target") or UnitIsEnemy("player", "target") then
         currentTargetGuid = 0
         currentTargetStatus = 0
-        Turtle_BotXpLock_TargetName:SetText("No Bot Selected")
-        Turtle_BotXpLock_TargetInfo:SetText("Target a friendly companion bot or party member")
+        Turtle_BotXpLock_TargetName:SetText("No Player/Bot Selected")
+        Turtle_BotXpLock_TargetInfo:SetText("Target a friendly Player/Bot or party member")
         Turtle_BotXpLock_StatusText:SetText("XP STATUS: NO TARGET")
         Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.12, 0.12, 0.15, 0.85)
         Turtle_BotXpLock_FreezeButton:Disable()
@@ -120,20 +218,58 @@ local function UpdateTargetDisplay()
     local level = UnitLevel("target")
     local class, _ = UnitClass("target")
     Turtle_BotXpLock_TargetName:SetText("|cffffd100" .. name .. "|r")
-    Turtle_BotXpLock_TargetInfo:SetText("Level " .. tostring(level) .. " " .. (class or "Player"))
+    Turtle_BotXpLock_TargetInfo:SetText("Level " .. tostring(level) .. " " .. (class or "Player/Bot"))
 
-    Turtle_BotXpLock_FreezeButton:Enable()
-    Turtle_BotXpLock_UnlockButton:Enable()
+    -- Instant Cache Seam: Immediately check known registry or party list for 0ms lag-free status display!
+    local cachedFound = false
+    local nRegistry = table.getn(registryBots)
+    for b = 1, nRegistry do
+        local r = registryBots[b]
+        if r and r.name == name then
+            currentTargetGuid = r.guid
+            cachedFound = true
+            ApplyStatusData(r.guid, r.name, r.level or level, 0, 0, r.locked, r.lockLevel, r.xpRate)
+            break
+        end
+    end
+
+    if not cachedFound then
+        local numParty = GetNumPartyMembers()
+        for p = 1, numParty do
+            if UnitName("party" .. p) == name and partyBotStatus[p] then
+                local pData = partyBotStatus[p]
+                cachedFound = true
+                ApplyStatusData(0, name, level, 0, 0, pData.isLocked, pData.lockLevel, pData.xpRate)
+                break
+            end
+        end
+    end
+
+    if not cachedFound then
+        Turtle_BotXpLock_StatusText:SetText("|cffffd100READING XP STATUS...|r")
+        Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.20, 0.20, 0.25, 0.85)
+        Turtle_BotXpLock_FreezeButton:Enable()
+        Turtle_BotXpLock_UnlockButton:Enable()
+    end
+
     for i = 19, 59, 10 do
         local btn = getglobal("Turtle_BotXpLock_Cap" .. i)
         if btn then btn:Enable() end
     end
 
-    -- Query fresh status silently from server (works whether solo or grouped)
-    SendModuleMessage("QUERY", 0, 0, nil, false)
+    -- Run authoritative status query directly by bot name so server responds instantly without target delay
+    local now = GetTime()
+    if (now - lastTargetQueryTime) >= QUERY_COOLDOWN or (not cachedFound) then
+        lastTargetQueryTime = now
+        SendModuleMessage("QUERY", currentTargetGuid or 0, 0, nil, false, name)
+    end
 end
 
-local function ApplyStatusData(guid, name, level, curXP, nextXP, isLocked, lockLevel, xpRate)
+ApplyStatusData = function(guid, name, level, curXP, nextXP, isLocked, lockLevel, xpRate)
+    if not IsPanelOpen() then
+        return
+    end
+
     local targetName = UnitName("target")
     local rateVal = xpRate or 1.0
 
@@ -144,11 +280,15 @@ local function ApplyStatusData(guid, name, level, curXP, nextXP, isLocked, lockL
                 currentTargetStatus = 2 -- Capped
                 Turtle_BotXpLock_StatusText:SetText("|cffffa500CAPPED AT LVL " .. tostring(lockLevel) .. " (RATE: " .. tostring(rateVal) .. "x)|r")
                 Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.35, 0.25, 0.05, 0.90)
+                Turtle_BotXpLock_FreezeButton:Enable()
+                Turtle_BotXpLock_UnlockButton:Enable()
             else
                 currentTargetStatus = 1 -- Locked
                 local lockDisp = (lockLevel > 0) and lockLevel or level
                 Turtle_BotXpLock_StatusText:SetText("|cffff2020LOCKED AT LVL " .. tostring(lockDisp) .. " (0x XP)|r")
                 Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.40, 0.08, 0.08, 0.90)
+                Turtle_BotXpLock_FreezeButton:Disable()
+                Turtle_BotXpLock_UnlockButton:Enable()
             end
         else
             currentTargetStatus = 0 -- Unlocked
@@ -158,6 +298,8 @@ local function ApplyStatusData(guid, name, level, curXP, nextXP, isLocked, lockL
                 Turtle_BotXpLock_StatusText:SetText("|cff00ff00XP ACTIVE (NORMAL 1.0x)|r")
             end
             Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.08, 0.35, 0.08, 0.90)
+            Turtle_BotXpLock_FreezeButton:Enable()
+            Turtle_BotXpLock_UnlockButton:Disable()
         end
     end
 
@@ -193,9 +335,28 @@ local function ApplyStatusData(guid, name, level, curXP, nextXP, isLocked, lockL
             end
         end
     end
+
+    -- Keep registry synced if this bot is in the list
+    for b = 1, table.getn(registryBots) do
+        local rEntry = registryBots[b]
+        if rEntry and (rEntry.name == name or rEntry.guid == guid) then
+            rEntry.locked = isLocked
+            rEntry.lockLevel = lockLevel
+            rEntry.xpRate = rateVal
+            if level and level > 0 then rEntry.level = level end
+            if Turtle_BotXpLock_RegistryFrame and Turtle_BotXpLock_RegistryFrame:IsShown() then
+                UpdateRegistryDisplay()
+            end
+            break
+        end
+    end
 end
 
 local function UpdatePartyRoster()
+    if not IsPanelOpen() then
+        return
+    end
+
     local numParty = GetNumPartyMembers()
     for i = 1, 4 do
         local row = getglobal("Turtle_BotXpLock_PartyRow" .. i)
@@ -219,8 +380,20 @@ local function UpdatePartyRoster()
                 end
 
                 local statusText = getglobal("Turtle_BotXpLock_PartyRow" .. i .. "Status")
-                if statusText and (not pData) then
-                    statusText:SetText("Lvl " .. tostring(pLevel))
+                if statusText then
+                    if pData then
+                        local statusStr = "|cff00ff00" .. tostring(pData.xpRate or 1.0) .. "x|r"
+                        if pData.isLocked == 1 or pData.xpRate <= 0 then
+                            if pData.lockLevel > 0 and pLevel < pData.lockLevel then
+                                statusStr = "|cffffa500CAP " .. tostring(pData.lockLevel) .. "|r"
+                            else
+                                statusStr = "|cffff2020LOCKED|r"
+                            end
+                        end
+                        statusText:SetText(statusStr)
+                    else
+                        statusText:SetText("Lvl " .. tostring(pLevel))
+                    end
                 end
             else
                 row:Hide()
@@ -232,9 +405,13 @@ end
 -- -----------------------------------------------------------------------------
 -- 5. Configured Bots Registry Panel Display (Reads SQL / Server Cache)
 -- -----------------------------------------------------------------------------
-local function UpdateRegistryDisplay()
+UpdateRegistryDisplay = function()
+    if not Turtle_BotXpLock_RegistryFrame or not Turtle_BotXpLock_RegistryFrame:IsShown() then
+        return
+    end
+
     local total = table.getn(registryBots)
-    Turtle_BotXpLock_RegistryCount:SetText("Total: " .. tostring(total) .. " bots configured")
+    Turtle_BotXpLock_RegistryCount:SetText("Total: " .. tostring(total) .. " configured (Players/Bots)")
 
     local maxPages = math.max(1, math.ceil(total / ROWS_PER_PAGE))
     if registryPage > maxPages then registryPage = maxPages end
@@ -254,12 +431,16 @@ local function UpdateRegistryDisplay()
             local nameTxt = getglobal("Turtle_BotXpLock_RegRow" .. r .. "Name")
             local lvlTxt = getglobal("Turtle_BotXpLock_RegRow" .. r .. "Level")
             local statusTxt = getglobal("Turtle_BotXpLock_RegRow" .. r .. "Status")
+            local freezeBtn = getglobal("Turtle_BotXpLock_RegRow" .. r .. "FreezeBtn")
+            local unlockBtn = getglobal("Turtle_BotXpLock_RegRow" .. r .. "UnlockBtn")
+            local deleteBtn = getglobal("Turtle_BotXpLock_RegRow" .. r .. "DeleteBtn")
 
             if nameTxt then nameTxt:SetText(entry.name) end
             if lvlTxt then lvlTxt:SetText("Lvl " .. tostring(entry.level)) end
 
+            local isLocked = (entry.locked == 1 or entry.xpRate <= 0)
             local statusStr = "|cff00ff00" .. tostring(entry.xpRate) .. "x|r"
-            if entry.locked == 1 or entry.xpRate <= 0 then
+            if isLocked then
                 if entry.lockLevel > 0 and entry.level < entry.lockLevel then
                     statusStr = "|cffffa500CAP " .. tostring(entry.lockLevel) .. "|r"
                 else
@@ -267,6 +448,18 @@ local function UpdateRegistryDisplay()
                 end
             end
             if statusTxt then statusTxt:SetText(statusStr) end
+
+            -- Adjust Freeze & Unlock buttons based on read status
+            if freezeBtn and unlockBtn then
+                if isLocked then
+                    freezeBtn:Disable()
+                    unlockBtn:Enable()
+                else
+                    freezeBtn:Enable()
+                    unlockBtn:Disable()
+                end
+            end
+            if deleteBtn then deleteBtn:Enable() end
         else
             row:Hide()
         end
@@ -278,19 +471,56 @@ function TurtleBotXpLock_OnRegistryPage(delta)
     UpdateRegistryDisplay()
 end
 
-function TurtleBotXpLock_OnRegistryRowSelect(idx)
+function TurtleBotXpLock_OnRegistryRowFreeze(idx)
     local entry = registryBots[idx]
     if not entry then return end
-    TargetByName(entry.name, true)
-    UpdateTargetDisplay()
+    SendModuleMessage("LOCK", entry.guid, 0, nil, true)
+    entry.locked = 1
+    entry.lockLevel = 0
+    UpdateRegistryDisplay()
+    if IsPanelOpen() then
+        UpdateTargetDisplay()
+    end
+end
+
+function TurtleBotXpLock_OnRegistryRowUnlock(idx)
+    local entry = registryBots[idx]
+    if not entry then return end
+    SendModuleMessage("UNLOCK", entry.guid, 0, nil, true)
+    entry.locked = 0
+    entry.lockLevel = 0
+    entry.xpRate = 1.0
+    UpdateRegistryDisplay()
+    if IsPanelOpen() then
+        UpdateTargetDisplay()
+    end
+end
+
+function TurtleBotXpLock_OnRegistryRowDelete(idx)
+    local entry = registryBots[idx]
+    if not entry then return end
+    -- Send directly by low GUID: does not require target or presence in range!
+    SendModuleMessage("DELETE", entry.guid, 0, nil, true)
+    table.remove(registryBots, idx)
+    UpdateRegistryDisplay()
+    if IsPanelOpen() then
+        UpdateTargetDisplay()
+    end
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Deleted |cffffd100" .. entry.name .. "|r (GUID " .. tostring(entry.guid) .. ") from database and reset XP.")
+end
+
+function TurtleBotXpLock_OnRegistryRefresh()
+    SendModuleMessage("LIST_QUERY", 0, 0, nil, true)
 end
 
 function TurtleBotXpLock_ToggleRegistry()
-    if Turtle_BotXpLock_RegistryFrame:IsShown() then
+    if Turtle_BotXpLock_RegistryFrame and Turtle_BotXpLock_RegistryFrame:IsShown() then
         Turtle_BotXpLock_RegistryFrame:Hide()
-        Turtle_BotXpLock_ToggleRegistryButton:SetText("All Configured Bots >>")
+        Turtle_BotXpLock_ToggleRegistryButton:SetText("Configured Players/Bots >>")
     else
-        Turtle_BotXpLock_RegistryFrame:Show()
+        if Turtle_BotXpLock_RegistryFrame then
+            Turtle_BotXpLock_RegistryFrame:Show()
+        end
         Turtle_BotXpLock_ToggleRegistryButton:SetText("<< Hide Registry")
         SendModuleMessage("LIST_QUERY", 0, 0, nil, true)
     end
@@ -302,37 +532,51 @@ end
 function TurtleBotXpLock_OnFreezeClick()
     local name = UnitName("target")
     if not name then return end
-    SendModuleMessage("LOCK", 0, 0, nil, true)
+    if currentTargetStatus == 1 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r XP is already locked for |cffffd100" .. name .. "|r.")
+        return
+    end
+    SendModuleMessage("LOCK", currentTargetGuid or 0, 0, nil, true)
     currentTargetStatus = 1
     Turtle_BotXpLock_StatusText:SetText("|cffff2020LOCKED (0x XP)|r")
     Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.40, 0.08, 0.08, 0.90)
+    Turtle_BotXpLock_FreezeButton:Disable()
+    Turtle_BotXpLock_UnlockButton:Enable()
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Locked XP for |cffffd100" .. name .. "|r.")
 end
 
 function TurtleBotXpLock_OnUnlockClick()
     local name = UnitName("target")
     if not name then return end
-    SendModuleMessage("UNLOCK", 0, 0, nil, true)
+    if currentTargetStatus == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r XP is already unlocked for |cffffd100" .. name .. "|r.")
+        return
+    end
+    SendModuleMessage("UNLOCK", currentTargetGuid or 0, 0, nil, true)
     currentTargetStatus = 0
     Turtle_BotXpLock_StatusText:SetText("|cff00ff00XP ACTIVE (NORMAL 1.0x)|r")
     Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.08, 0.35, 0.08, 0.90)
+    Turtle_BotXpLock_FreezeButton:Enable()
+    Turtle_BotXpLock_UnlockButton:Disable()
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Unlocked XP for |cffffd100" .. name .. "|r.")
 end
 
 function TurtleBotXpLock_OnCapClick(level)
     local name = UnitName("target")
     if not name then return end
-    SendModuleMessage("LOCK", 0, level, nil, true)
+    SendModuleMessage("LOCK", currentTargetGuid or 0, level, nil, true)
     currentTargetStatus = 2
     Turtle_BotXpLock_StatusText:SetText("|cffffa500CAPPED AT LVL " .. tostring(level) .. "|r")
     Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.35, 0.25, 0.05, 0.90)
+    Turtle_BotXpLock_FreezeButton:Enable()
+    Turtle_BotXpLock_UnlockButton:Enable()
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Set Level " .. tostring(level) .. " cap for |cffffd100" .. name .. "|r.")
 end
 
 function TurtleBotXpLock_OnCustomCapSet()
     local name = UnitName("target")
     if not name then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Target a companion bot first to set a custom cap.")
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Target a Player/Bot first to set a custom cap.")
         return
     end
     local valStr = Turtle_BotXpLock_CustomCapBox:GetText()
@@ -342,22 +586,41 @@ function TurtleBotXpLock_OnCustomCapSet()
         return
     end
     Turtle_BotXpLock_CustomCapBox:ClearFocus()
-    SendModuleMessage("LOCK", 0, level, nil, true)
+    SendModuleMessage("LOCK", currentTargetGuid or 0, level, nil, true)
     currentTargetStatus = 2
     Turtle_BotXpLock_StatusText:SetText("|cffffa500CAPPED AT LVL " .. tostring(level) .. "|r")
     Turtle_BotXpLock_StatusBadge:SetBackdropColor(0.35, 0.25, 0.05, 0.90)
+    Turtle_BotXpLock_FreezeButton:Enable()
+    Turtle_BotXpLock_UnlockButton:Enable()
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Custom cap of Level " .. tostring(level) .. " applied to |cffffd100" .. name .. "|r.")
 end
 
 function TurtleBotXpLock_OnRateClick(rate)
     local name = UnitName("target")
     if not name then return end
-    SendModuleMessage("RATE", 0, 0, rate, true)
+    SendModuleMessage("RATE", currentTargetGuid or 0, 0, rate, true)
     Turtle_BotXpLock_StatusText:SetText("|cff00ff00XP ACTIVE (RATE: |cffffd100" .. tostring(rate) .. "x|cff00ff00)|r")
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Set XP rate to " .. tostring(rate) .. "x for |cffffd100" .. name .. "|r.")
 end
 
--- Toggles Party Member XP between Freeze and Unlock based on active status
+function TurtleBotXpLock_OnCustomRateSet()
+    local name = UnitName("target")
+    if not name then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Target a Player/Bot first to set a custom XP rate.")
+        return
+    end
+    local valStr = Turtle_BotXpLock_CustomRateBox:GetText()
+    local rate = tonumber(valStr)
+    if not rate or rate < 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Please enter a valid rate multiplier (e.g. 0.5, 1.5, 2.0).")
+        return
+    end
+    Turtle_BotXpLock_CustomRateBox:ClearFocus()
+    SendModuleMessage("RATE", currentTargetGuid or 0, 0, rate, true)
+    Turtle_BotXpLock_StatusText:SetText("|cff00ff00XP ACTIVE (RATE: |cffffd100" .. tostring(rate) .. "x|cff00ff00)|r")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Set XP rate to " .. tostring(rate) .. "x for |cffffd100" .. name .. "|r.")
+end
+
 function TurtleBotXpLock_OnPartyRowToggle(partyIndex)
     local unit = "party" .. tostring(partyIndex)
     local name = UnitName(unit)
@@ -383,18 +646,27 @@ function TurtleBotXpLock_OnPartyRowToggle(partyIndex)
 end
 
 function TurtleBotXpLock_Refresh()
+    if not IsPanelOpen() then
+        return
+    end
+    lastTargetQueryTime = 0
     UpdateTargetDisplay()
     UpdatePartyRoster()
-    SendModuleMessage("ROSTER_QUERY", 0, 0, nil, false)
-    if Turtle_BotXpLock_RegistryFrame:IsShown() then
+    local now = GetTime()
+    if (now - lastRosterQueryTime) >= QUERY_COOLDOWN then
+        lastRosterQueryTime = now
+        SendModuleMessage("ROSTER_QUERY", 0, 0, nil, false)
+    end
+    if Turtle_BotXpLock_RegistryFrame and Turtle_BotXpLock_RegistryFrame:IsShown() then
         SendModuleMessage("LIST_QUERY", 0, 0, nil, true)
     end
 end
 
 -- -----------------------------------------------------------------------------
 -- 7. Minimap Button (31x31 Vanilla Standard Circular Button)
--- Left-Click: Quick Toggle Target Bot XP Lock (Freeze or Unlock)
--- Right-Click / Shift-Click: Open Controller Panel
+-- Left-Click: Open/Close Main Controller Panel
+-- Right-Click: Open/Close Configured Bot Registry Panel
+-- Alt + Shift + Left-Click: Safe Toggle Freeze / Unlock XP on current target safely
 -- -----------------------------------------------------------------------------
 local minimapBtn = CreateFrame("Button", "TurtleBotXpLockMinimapButton", Minimap)
 minimapBtn:SetFrameStrata("MEDIUM")
@@ -408,7 +680,7 @@ minimapBtn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highli
 local mmOverlay = minimapBtn:CreateTexture(nil, "OVERLAY")
 mmOverlay:SetWidth(53)
 mmOverlay:SetHeight(53)
-mmOverlay:SetTexture("Interface\Minimap\MiniMap-TrackingBorder")
+mmOverlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 mmOverlay:SetPoint("TOPLEFT", minimapBtn, "TOPLEFT", 0, 0)
 
 local mmIcon = minimapBtn:CreateTexture(nil, "BACKGROUND")
@@ -431,7 +703,7 @@ end
 minimapBtn:SetScript("OnDragStart", function()
     this:SetScript("OnUpdate", function()
         local mx, my = Minimap:GetCenter()
-        local scale = Minimap:GetEffectiveScale()
+        local scale = scale or Minimap:GetEffectiveScale()
         local px, py = GetCursorPosition()
         px, py = px / scale, py / scale
         if not Turtle_BotXpLock_DB then Turtle_BotXpLock_DB = {} end
@@ -445,16 +717,12 @@ minimapBtn:SetScript("OnDragStop", function()
 end)
 
 minimapBtn:SetScript("OnClick", function()
-    if arg1 == "RightButton" or (IsShiftKeyDown and IsShiftKeyDown()) or (IsControlKeyDown and IsControlKeyDown()) or (IsAltKeyDown and IsAltKeyDown()) then
-        if Turtle_BotXpLockFrame:IsShown() then
-            HideUIPanel(Turtle_BotXpLockFrame)
-        else
-            ShowUIPanel(Turtle_BotXpLockFrame)
-            TurtleBotXpLock_Refresh()
-        end
-    else
-        if UnitExists("target") and UnitIsPlayer("target") and UnitIsFriend("player", "target") then
-            -- Quick Toggle target bot
+    -- Safe quick toggle: strictly requires both Alt and Shift keys held down to avoid accidents
+    local isAlt = IsAltKeyDown and IsAltKeyDown()
+    local isShift = IsShiftKeyDown and IsShiftKeyDown()
+
+    if isAlt and isShift and arg1 == "LeftButton" then
+        if UnitExists("target") and not UnitIsEnemy("player", "target") then
             if currentTargetStatus == 1 or currentTargetStatus == 2 then
                 SendModuleMessage("UNLOCK", 0, 0, nil, true)
                 currentTargetStatus = 0
@@ -464,18 +732,40 @@ minimapBtn:SetScript("OnClick", function()
                 currentTargetStatus = 1
                 DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Locked XP for |cffffd100" .. UnitName("target") .. "|r.")
             end
+            if IsPanelOpen() then
+                UpdateTargetDisplay()
+            end
         else
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Target a companion bot to toggle XP lock, or Right-Click / Shift-Click to open Controller window.")
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Target a Player/Bot first to toggle XP lock.")
         end
+        return
+    end
+
+    -- Right-Click toggles side Registry panel
+    if arg1 == "RightButton" then
+        if not IsPanelOpen() then
+            ShowUIPanel(Turtle_BotXpLockFrame)
+        end
+        TurtleBotXpLock_ToggleRegistry()
+        return
+    end
+
+    -- Left-Click opens/closes the Main Controller Panel
+    if IsPanelOpen() then
+        HideUIPanel(Turtle_BotXpLockFrame)
+    else
+        ShowUIPanel(Turtle_BotXpLockFrame)
+        TurtleBotXpLock_Refresh()
     end
 end)
 
 minimapBtn:SetScript("OnEnter", function()
     GameTooltip:SetOwner(this, "ANCHOR_LEFT")
     GameTooltip:ClearLines()
-    GameTooltip:AddLine("Bot XP Controller", 1.0, 0.82, 0.0)
-    GameTooltip:AddLine("|cffffffffLeft-Click:|r Quick-Toggle Target Bot XP Lock", 0.9, 0.9, 0.9)
-    GameTooltip:AddLine("|cffffffffRight-Click / Shift-Click:|r Open Controller Panel", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("Player & Bot XP Controller", 1.0, 0.82, 0.0)
+    GameTooltip:AddLine("|cffffffffLeft-Click:|r Open / Close Controller Panel", 0.9, 0.9, 0.9)
+    GameTooltip:AddLine("|cffffffffRight-Click:|r Open / Close Registry & Settings", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("|cffffa500Alt + Shift + Left-Click:|r Safe Toggle Freeze / Unlock XP", 1.0, 0.65, 0.0)
     GameTooltip:AddLine("|cffffffffDrag:|r Move Minimap Icon", 0.6, 0.6, 0.6)
     GameTooltip:Show()
 end)
@@ -502,18 +792,22 @@ eventFrame:SetScript("OnEvent", function()
             UpdateMinimapPosition()
         end
     elseif event == "PLAYER_TARGET_CHANGED" then
-        if Turtle_BotXpLockFrame:IsShown() then
+        -- Strictly executed ONLY when the Controller Panel is open on screen!
+        -- If the panel is closed, completely inactive: no scans, no queries, no chat messages!
+        if IsPanelOpen() then
+            lastTargetQueryTime = 0
             UpdateTargetDisplay()
-        elseif UnitExists("target") and UnitIsPlayer("target") and UnitIsFriend("player", "target") then
-            -- Silent background query so minimap button toggle knows status immediately
-            SendModuleMessage("QUERY", 0, 0, nil, false)
+        else
+            currentTargetGuid = 0
+            currentTargetStatus = 0
         end
     elseif event == "PARTY_MEMBERS_CHANGED" then
-        if Turtle_BotXpLockFrame:IsShown() then
+        if IsPanelOpen() then
             UpdatePartyRoster()
         end
     elseif event == "CHAT_MSG_ADDON" then
-        if arg1 == ADDON_PREFIX then
+        -- Only process incoming addon wire messages if the controller panel is open
+        if IsPanelOpen() and arg1 == ADDON_PREFIX then
             local tokens = SplitString(arg2, "\t")
             local nTokens = table.getn(tokens)
             if nTokens >= 8 and tokens[1] == "STATUS" then
@@ -569,7 +863,7 @@ SLASH_TURTLEBOTXPLOCK2 = "/xplock"
 
 SlashCmdList["TURTLEBOTXPLOCK"] = function(msg)
     if not msg or msg == "" then
-        if Turtle_BotXpLockFrame:IsShown() then
+        if IsPanelOpen() then
             HideUIPanel(Turtle_BotXpLockFrame)
         else
             ShowUIPanel(Turtle_BotXpLockFrame)
@@ -588,6 +882,8 @@ SlashCmdList["TURTLEBOTXPLOCK"] = function(msg)
         SendModuleMessage("UNLOCK", 0, 0, nil, true)
     elseif cmd == "toggle" then
         SendModuleMessage("TOGGLE", 0, 0, nil, true)
+    elseif cmd == "delete" or cmd == "remove" or cmd == "reset" then
+        SendModuleMessage("DELETE", 0, 0, nil, true)
     elseif cmd == "rate" then
         local rate = tonumber(tokens[2]) or 1.0
         SendModuleMessage("RATE", 0, 0, rate, true)
@@ -595,13 +891,5 @@ SlashCmdList["TURTLEBOTXPLOCK"] = function(msg)
         SendModuleMessage("QUERY", 0, 0, nil, false)
     elseif cmd == "list" then
         TurtleBotXpLock_ToggleRegistry()
-    else
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BotXpLock]|r Commands:")
-        DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock|r - Toggle Controller Panel")
-        DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock toggle|r - Toggle XP lock (freeze/unlock)")
-        DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock lock [capLevel]|r - Lock target bot (e.g. /xplock lock 19)")
-        DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock rate <mult>|r - Set XP rate (e.g. /xplock rate 0.5)")
-        DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock unlock|r - Unlock target bot (1.0x)")
-        DEFAULT_CHAT_FRAME:AddMessage("  |cffffd100/xplock list|r - Open All Configured Bots Registry Panel")
     end
 end
